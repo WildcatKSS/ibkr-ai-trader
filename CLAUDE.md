@@ -1,229 +1,181 @@
-# CLAUDE.md — ibkr-ai-trader
+# IBKR AI Trader — Claude Code Instructions
 
-This file provides guidance for AI assistants (Claude and others) working on this repository. Read this before making any changes.
+This file gives Claude Code persistent context about this project.
+Read it fully before making any changes to the codebase.
 
----
+-----
 
 ## Project Overview
 
-**ibkr-ai-trader** is an AI-powered trading system that integrates with Interactive Brokers (IBKR) via the TWS API or IB Gateway. The goal is to automate trading decisions using AI/ML models while managing risk through programmatic controls.
+Autonomous intraday trading bot for Interactive Brokers.
+Stack: Python · FastAPI · MariaDB · Nginx · Ubuntu Server.
+AI layer: LightGBM (signals) + Claude API (reasoning/explainability).
+All positions are intraday only — no overnight exposure ever.
 
-> **Status**: Repository initialized. No source files committed yet. This document establishes the intended conventions and structure for the project.
+-----
 
----
-
-## Repository Structure (Intended)
-
-```
-ibkr-ai-trader/
-├── CLAUDE.md                  # This file
-├── README.md                  # Human-facing project overview
-├── .env.example               # Template for required environment variables
-├── .gitignore                 # Must exclude .env, secrets, __pycache__, etc.
-├── pyproject.toml             # Python project config (dependencies, tools)
-├── requirements.txt           # Pinned runtime dependencies
-├── requirements-dev.txt       # Dev/test dependencies
-├── docker-compose.yml         # Local dev stack (IB Gateway, app, etc.)
-├── Dockerfile                 # App container definition
-│
-├── src/
-│   └── ibkr_ai_trader/
-│       ├── __init__.py
-│       ├── main.py            # Application entry point
-│       ├── config.py          # Config loading from env vars
-│       ├── broker/            # IBKR connection and order management
-│       │   ├── __init__.py
-│       │   ├── client.py      # IB API client wrapper
-│       │   ├── orders.py      # Order placement and management
-│       │   └── market_data.py # Real-time and historical data feeds
-│       ├── strategy/          # Trading strategy implementations
-│       │   ├── __init__.py
-│       │   └── base.py        # Abstract strategy interface
-│       ├── ai/                # AI/ML model integrations
-│       │   ├── __init__.py
-│       │   └── signal.py      # Signal generation from AI models
-│       ├── risk/              # Risk management and position sizing
-│       │   ├── __init__.py
-│       │   └── manager.py     # Risk controls and limits
-│       └── utils/             # Shared utilities
-│           ├── __init__.py
-│           └── logging.py     # Structured logging setup
-│
-├── tests/
-│   ├── conftest.py            # Shared fixtures
-│   ├── unit/                  # Unit tests (no external dependencies)
-│   └── integration/           # Tests that require IB Gateway or mocks
-│
-├── scripts/                   # One-off utility scripts (not imported)
-└── docs/                      # Extended documentation
-```
-
----
-
-## Technology Stack
-
-- **Language**: Python 3.11+
-- **IBKR API**: `ibapi` (Interactive Brokers official Python client) or `ib_insync`
-- **AI/LLM**: Anthropic Claude API (via `anthropic` SDK) for trade signal analysis
-- **Testing**: `pytest` with `pytest-asyncio` for async code
-- **Linting**: `ruff` for linting and formatting
-- **Type checking**: `mypy` in strict mode
-- **Dependency management**: `pyproject.toml` + `pip` or `uv`
-- **Containerization**: Docker + Docker Compose
-
----
-
-## Development Workflow
-
-### Setup
+## Commands
 
 ```bash
-# Clone and enter repo
-git clone <repo-url> && cd ibkr-ai-trader
+# Activate virtualenv (always required before running anything)
+source /opt/ibkr-trader/venv/bin/activate
 
-# Create virtual environment
-python -m venv .venv && source .venv/bin/activate
+# Start services
+systemctl start ibkr-bot ibkr-web
 
-# Install dependencies
-pip install -e ".[dev]"
+# Stop services
+systemctl stop ibkr-bot ibkr-web
 
-# Copy and configure environment
-cp .env.example .env
-# Edit .env with your IBKR credentials and API keys
+# View live logs
+journalctl -u ibkr-bot -f
+journalctl -u ibkr-web -f
+
+# Run database migrations
+alembic upgrade head
+
+# Seed default configuration
+python db/seed.py
+
+# Run tests
+pytest tests/
+
+# Run backtesting engine
+python -m bot.backtesting.engine --instrument AAPL --start 2024-01-01 --end 2024-12-31 --timeframe 5min
+
+# Retrain LightGBM model manually
+python -m bot.ml.trainer --retrain
+
+# Roll back to a previous model version
+python -m bot.ml.versioning --rollback <version>
 ```
 
-### Running Locally
+-----
 
-```bash
-# Start IB Gateway via Docker (paper trading port 4002)
-docker-compose up -d ib-gateway
+## Repository Structure
 
-# Run the trader
-python -m ibkr_ai_trader.main
+```
+bot/core/        Trading loop, IBKR connection, watchdog & reconnect logic, dry run mode
+bot/universe/    Daily stock/ETF scanner and Claude-powered selector
+bot/signals/     LightGBM → 15-min confirmation → Claude pipeline
+bot/ml/          LightGBM model, trainer, feature engineering, versioning, A/B test
+bot/risk/        Position sizing, gap filter, circuit breaker
+bot/orders/      Order executor, fill monitor, EOD close routine
+bot/backtesting/ Historical simulation engine
+bot/alerts/      Email and webhook notifications
+bot/utils/       Logger, NYSE calendar, config loader
+
+web/api/         FastAPI backend and all route handlers
+web/frontend/    Browser-based management dashboard
+
+db/              SQLAlchemy models, Alembic migrations, seed data
+deploy/          Nginx config, systemd services, setup.sh
+logs/            Rotating log files per category
 ```
 
-### Tests
+-----
 
-```bash
-# Run all tests
-pytest
+## Architecture Rules — NEVER violate these
 
-# Run only unit tests (no IB connection needed)
-pytest tests/unit/
+- **No overnight positions** — every code path that opens a position must be reachable by `eod_close.py`. Never bypass the EOD routine.
+- **TRADING_MODE must be checked before every order** — always validate `TRADING_MODE` (`paper` / `live` / `dryrun`) before sending anything to IBKR. In `dryrun` mode, log the intended order but send nothing.
+- **Never read secrets from anywhere except `.env`** — API keys and passwords are in `.env` only. Never hardcode, never read from DB, never log them.
+- **All configuration comes from MariaDB** — operational settings are stored in DB and managed via the web interface. Never read `settings.yaml` (it does not exist). Use `bot/utils/config.py` to load settings.
+- **Claude API is for reasoning only** — never use Claude API for real-time tick processing or inside tight loops. Claude is called once per signal (after LightGBM + 15-min filter) and once per universe scan.
+- **LightGBM runs locally** — signal generation must not depend on any external API call. The model file is loaded from `bot/ml/models/`.
 
-# Run with coverage
-pytest --cov=src/ibkr_ai_trader --cov-report=term-missing
-
-# Run type checks
-mypy src/
-
-# Run linter
-ruff check src/ tests/
-ruff format src/ tests/
-```
-
----
+-----
 
 ## Environment Variables
 
-All secrets and configuration must come from environment variables. Never hardcode credentials.
+`setup.sh` generates `/opt/ibkr-trader/.env` automatically. These variables must be present. Never add secrets anywhere else.
 
-| Variable | Required | Description |
-|---|---|---|
-| `IBKR_HOST` | Yes | TWS/Gateway host (default: `127.0.0.1`) |
-| `IBKR_PORT` | Yes | TWS/Gateway port (live: `7496`, paper: `7497`, gateway: `4001`/`4002`) |
-| `IBKR_CLIENT_ID` | Yes | Unique client ID for this connection |
-| `ANTHROPIC_API_KEY` | Yes | Claude API key for AI signal generation |
-| `TRADING_MODE` | Yes | `paper` or `live` — must be explicit |
-| `LOG_LEVEL` | No | `DEBUG`, `INFO`, `WARNING` (default: `INFO`) |
-| `MAX_POSITION_SIZE` | No | Maximum position size in USD (risk guard) |
-| `MAX_DAILY_LOSS` | No | Daily loss limit in USD before halting |
+| Variable            | Set by   | Description                                                             |
+|---------------------|----------|-------------------------------------------------------------------------|
+| `ANTHROPIC_API_KEY` | You      | Anthropic API key                                                       |
+| `IBKR_PORT`         | You      | TWS paper: 7497 · IB GW paper: 4002 · TWS live: 7496 · IB GW live: 4001 |
+| `ALPACA_API_KEY`    | You      | Alpaca News API key                                                     |
+| `ALPACA_API_SECRET` | You      | Alpaca News API secret                                                  |
+| `FINNHUB_API_KEY`   | You      | Finnhub API key (fallback news provider)                                |
+| `SMTP_PASSWORD`     | You      | SMTP password or app password for email alerts                          |
+| `DB_PASSWORD`       | setup.sh | Generated automatically                                                 |
+| `SECRET_KEY`        | setup.sh | Session signing key; generated automatically                            |
+| `DOMAIN`            | setup.sh | Domain name entered during setup for Certbot                            |
 
----
+`TRADING_MODE` and `EOD_CLOSE_MINUTES` are operational settings — configure them via the web interface under **Settings → Trading**, not in `.env`.
 
-## Key Conventions
+All other operational settings (risk parameters, position sizing, universe selection, etc.) are configured via the web interface and stored in MariaDB — never in `.env`.
 
-### Safety First — Trading-Specific Rules
+-----
 
-1. **TRADING_MODE guard**: Every order placement must check `config.trading_mode`. Live trading must require explicit opt-in. Paper trading is the default.
-2. **Risk manager is not optional**: No order may bypass `risk.manager.check()`. This is a hard architectural requirement.
-3. **No market orders without confirmation logic**: Use limit orders by default to avoid slippage on automation.
-4. **Idempotent order IDs**: Always generate deterministic order IDs to prevent duplicate fills on reconnect.
-5. **Halt on breach**: If `MAX_DAILY_LOSS` is hit, the system must stop placing new orders for the remainder of the trading session.
+## Signal Pipeline — exact order
 
-### Code Style
+1. `bot/signals/indicators.py` — calculate pandas-ta indicators on 5-min candles
+1. `bot/ml/model.py` — LightGBM prediction (long / short / no trade)
+1. `bot/signals/generator.py` — 15-min confirmation filter (both timeframes must agree)
+1. Claude API call — context, sentiment, final decision, entry/target/stop, explanation
+1. `bot/risk/manager.py` — risk check and position sizing
+1. `bot/orders/executor.py` — place order via IBKR API
 
-- Follow PEP 8; enforced via `ruff`
-- Use type annotations on all public functions and class attributes
-- Prefer `dataclasses` or `pydantic` models over raw dicts for structured data
-- Async code uses `asyncio`; avoid mixing sync/async carelessly
-- Log with structured key=value pairs, not f-string concatenation
+Never skip or reorder these steps.
 
-### Error Handling
+-----
 
-- Never silently swallow exceptions in trading-critical paths
-- IBKR API errors must be logged with the full error code and message
-- Network disconnects must trigger reconnect logic, not crash the process
-- All unhandled exceptions must halt trading (fail-safe, not fail-open)
+## Logging Rules
 
-### Testing
+Every module uses `bot/utils/logger.py` — never use `print()` or the standard `logging` module directly.
 
-- Unit tests must not make real network calls — mock the IBKR client
-- Integration tests are tagged `@pytest.mark.integration` and are skipped by default in CI
-- Every strategy and risk rule must have unit test coverage
-- Tests for order logic must verify both the happy path and rejection cases
+Each module logs to its own category:
 
-### Commits and Branches
+| Module             | Category    |
+|--------------------|-------------|
+| `bot/universe/`    | `universe`  |
+| `bot/signals/`     | `signals`   |
+| `bot/ml/`          | `ml`        |
+| `bot/risk/`        | `risk`      |
+| `bot/orders/`      | `trading`   |
+| `bot/alerts/`      | `trading`   |
+| `bot/core/`        | `ibkr`      |
+| `web/api/`         | `web`       |
+| Claude API calls   | `claude`    |
+| Sentiment analysis | `sentiment` |
 
-- Branch naming: `feature/<description>`, `fix/<description>`, `chore/<description>`
-- Commit messages: imperative mood, present tense (e.g., `Add RSI strategy`, `Fix reconnect loop`)
-- Do not commit `.env` files, secrets, or large data files
-- Keep PRs focused; one logical change per PR
+All ERROR and CRITICAL entries are also written to `logs/errors.log` automatically by the logger.
 
----
+-----
 
-## External Integrations
+## Database Rules
 
-### Interactive Brokers TWS / IB Gateway
+- Use SQLAlchemy ORM — never raw SQL strings
+- All schema changes go through Alembic migrations in `db/migrations/`
+- Never modify migration files after they have been applied
+- The `db/seed.py` script sets default values for all operational settings — update it when adding new settings
 
-- Use IB Gateway (not full TWS) for automated/headless deployments
-- Paper trading account is at port `4002` (Gateway) or `7497` (TWS)
-- Live trading account is at port `4001` (Gateway) or `7496` (TWS)
-- The API requires TWS/Gateway to be running and logged in
-- Client IDs must be unique per connection; conflicts cause silent failures
+-----
 
-### Anthropic Claude API
+## Testing Rules
 
-- Used for interpreting market context, news sentiment, or strategy signals
-- Always handle API rate limits and errors gracefully
-- Do not send PII or actual account details to the Claude API
-- Prompt templates should live in `src/ibkr_ai_trader/ai/prompts/`
+- Write a test for every new function in `tests/`
+- Tests must never connect to real IBKR or call the real Claude API — use mocks
+- Tests must never depend on `.env` values — use test fixtures
+- Run `pytest tests/` before committing
 
----
+-----
 
-## What AI Assistants Should NOT Do
+## Git Rules
 
-- **Do not hardcode** API keys, account IDs, or credentials anywhere
-- **Do not remove** risk manager checks or safety guards — ever
-- **Do not change** `TRADING_MODE` defaults from `paper` to `live`
-- **Do not add** untested order-placement code paths
-- **Do not commit** changes that break existing tests
-- **Do not introduce** dependencies without adding them to `pyproject.toml`
-- **Do not use** `os.system()` or shell injection patterns; use `subprocess` with argument lists if shell execution is needed
+- Branch naming: `feature/`, `fix/`, `refactor/` prefixes
+- Never commit `.env` or any file containing secrets
+- Never commit model files (`*.lgbm`) — they are generated locally
+- Commit messages in English, present tense: "Add fill monitor timeout logic"
 
----
+-----
 
-## Adding New Features
+## What Claude Should Not Do
 
-When implementing a new trading strategy:
-1. Create a new file under `src/ibkr_ai_trader/strategy/`
-2. Subclass the abstract `BaseStrategy` from `strategy/base.py`
-3. Implement `generate_signals()` and `on_bar()` methods
-4. Add unit tests in `tests/unit/strategy/`
-5. Register the strategy in `config.py` or a strategy registry
-
-When integrating a new AI model or signal source:
-1. Add the integration under `src/ibkr_ai_trader/ai/`
-2. Define a typed interface for the signal output
-3. Ensure the signal feeds into the existing risk-checked order flow
-4. Document the signal schema in the module docstring
+- Do not modify `db/migrations/` files that already exist
+- Do not add `print()` statements — use the logger
+- Do not add any `time.sleep()` calls in the trading loop — use async patterns
+- Do not change `TRADING_MODE` logic without updating all three paths: paper, live, dryrun
+- Do not make Claude API calls from inside `bot/ml/` — that module is ML only
+- Do not add dependencies without adding them to `requirements.txt`
+- The NYSE trading calendar uses the `trading_calendars` library — ensure it is in `requirements.txt` and imported via `bot/utils/calendar.py` only
