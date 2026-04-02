@@ -2,7 +2,7 @@
 
 An open-source intraday trading bot for Interactive Brokers, powered by Claude AI. Focused exclusively on **stocks and ETFs** — positions are opened and closed within the same trading day, with no overnight exposure.
 
-> ⚠️ **Work in progress** — This repository is currently in the documentation and architecture phase. All source code, configuration files, and scripts described in this README are not yet implemented. This document defines the intended architecture and behaviour of the finished system. See the [Development Status](#️-development-status) section for a full overview of what remains to be built.
+> ⚠️ **Work in progress** — This repository is in active development. The documentation, architecture, core logging module (`bot/utils/logger.py`), and server setup script (`deploy/setup.sh`) are complete. All remaining source code components are not yet implemented. See the [Development Status](#️-development-status) section for a full overview of what is done and what remains to be built.
 
 -----
 
@@ -1031,7 +1031,7 @@ Dry run mode executes the full trading pipeline — universe selection, signal g
 Enable dry run mode via `.env` or the web interface:
 
 ```env
-TRADING_MODE=dry_run    # paper | live | dry_run
+TRADING_MODE=dryrun    # paper | live | dryrun
 ```
 
 In dry run mode, all actions are logged and explained exactly as they would be in live mode. The only difference is that the final IBKR order submission step is skipped.
@@ -1110,7 +1110,7 @@ This project is currently in the **documentation and architecture phase**. The t
 |`web/api/routes/costs.py` — cost dashboard                          |🔲 To do   |
 |`web/api/routes/export.py` — trade export (CSV/Excel)               |🔲 To do   |
 |Dry run mode                                                        |🔲 To do   |
-|HTTPS / Let’s Encrypt — direct from setup.sh                        |🔲 To do   |
+|HTTPS / Let’s Encrypt — direct from setup.sh                        |✅ Complete|
 |2FA implementation                                                  |🔲 To do   |
 |Position sizing model (fixed %, Kelly)                              |🔲 To do   |
 |Per-instrument & per-sector capital caps                            |🔲 To do   |
@@ -1119,7 +1119,6 @@ This project is currently in the **documentation and architecture phase**. The t
 |A/B model shadow testing                                            |🔲 To do   |
 |Configuration audit trail                                           |🔲 To do   |
 |Cost dashboard (Claude API + commissions)                           |🔲 To do   |
-|Dry run mode                                                        |🔲 To do   |
 |Trade export (CSV / Excel)                                          |🔲 To do   |
 |Webhook support                                                     |🔲 To do   |
 
