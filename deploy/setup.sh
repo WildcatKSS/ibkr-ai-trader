@@ -112,13 +112,15 @@ fi
 
 # Create DB and user (idempotent).
 # SQL is written to a temp file and piped via stdin so the password never
-# appears in the process list (ps aux). Single quotes in the password are
-# doubled (SQL standard escaping: ' → '') before interpolation to prevent
-# syntax errors or injection if the password is ever manually set with special
-# characters. The temp file is removed immediately after use.
-DB_PASSWORD_SQL="${DB_PASSWORD//\'/\'\'}"
+# appears in the process list (ps aux). Both single quotes (' → '') and
+# backslashes (\ → \\) are escaped before interpolation — MariaDB treats \
+# as an escape character in string literals by default, so both characters
+# must be handled. trap guarantees cleanup even if mariadb exits non-zero.
+DB_PASSWORD_SQL="${DB_PASSWORD//\\/\\\\}"   # escape backslashes first
+DB_PASSWORD_SQL="${DB_PASSWORD_SQL//\'/\'\'}" # then escape single quotes
 DB_SQL_FILE=$(mktemp)
 chmod 600 "$DB_SQL_FILE"
+trap 'rm -f "$DB_SQL_FILE"' EXIT
 cat > "$DB_SQL_FILE" <<SQLEOF
 CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\`
     CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -128,6 +130,7 @@ GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'localhost';
 FLUSH PRIVILEGES;
 SQLEOF
 mariadb < "$DB_SQL_FILE"
+trap - EXIT
 rm -f "$DB_SQL_FILE"
 info "Database '${DB_NAME}' and user '${DB_USER}' ready."
 
@@ -340,11 +343,11 @@ SMTP_PASSWORD=
 # ── Generated automatically — do not change ──────────────────────────────────
 DB_HOST=localhost
 DB_PORT=3306
-DB_NAME=${DB_NAME}
-DB_USER=${DB_USER}
-DB_PASSWORD=${DB_PASSWORD}
-SECRET_KEY=${SECRET_KEY}
-DOMAIN=${DOMAIN}
+DB_NAME="${DB_NAME}"
+DB_USER="${DB_USER}"
+DB_PASSWORD="${DB_PASSWORD}"
+SECRET_KEY="${SECRET_KEY}"
+DOMAIN="${DOMAIN}"
 ENVFILE
     chmod 600 "$ENV_FILE"
     chown "${APP_USER}:${APP_USER}" "$ENV_FILE"
