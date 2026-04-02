@@ -15,7 +15,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Colour helpers
 # ---------------------------------------------------------------------------
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33d'; NC='\033[0m'
 info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*" >&2; exit 1; }
@@ -49,17 +49,18 @@ ENV_FILE="${APP_DIR}/.env"
 
 # ---------------------------------------------------------------------------
 # Resolve DB password: read from existing .env or generate a new one.
-# This ensures the summary always shows the actual password in use, and
-# prevents the DB user from getting out of sync with .env on re-runs.
+# Validate that the values read are non-empty to catch corrupt/edited .env files.
 # ---------------------------------------------------------------------------
 if [[ -f "$ENV_FILE" ]]; then
     DB_PASSWORD=$(grep '^DB_PASSWORD=' "$ENV_FILE" | cut -d= -f2-)
-    SECRET_KEY=$(grep '^SECRET_KEY=' "$ENV_FILE" | cut -d= -f2-)
+    SECRET_KEY=$(grep  '^SECRET_KEY='  "$ENV_FILE" | cut -d= -f2-)
+    [[ -n "$DB_PASSWORD" ]] || error ".env exists but DB_PASSWORD is empty. Fix ${ENV_FILE} before re-running."
+    [[ -n "$SECRET_KEY"  ]] || error ".env exists but SECRET_KEY is empty. Fix ${ENV_FILE} before re-running."
     FIRST_RUN=false
     info "Existing .env found — reusing DB credentials."
 else
     DB_PASSWORD=$(openssl rand -base64 32 | tr -d '/+=\n' | head -c 32)
-    SECRET_KEY=$(openssl rand -base64 48 | tr -d '/+=\n' | head -c 48)
+    SECRET_KEY=$(openssl rand  -base64 48 | tr -d '/+=\n' | head -c 48)
     FIRST_RUN=true
 fi
 
@@ -110,17 +111,20 @@ else
 fi
 
 # Create DB and user (idempotent).
-# ALTER USER is always executed so the password stays in sync with .env
-# even if the user already existed from a previous run.
-mariadb -e "CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-mariadb -e "CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASSWORD}';"
-mariadb -e "ALTER USER '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASSWORD}';"
-mariadb -e "GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'localhost';"
-mariadb -e "FLUSH PRIVILEGES;"
+# SQL is passed via stdin to avoid the DB password appearing in the process
+# list (ps aux) as a command-line argument.
+mariadb <<SQL
+CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\`
+    CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASSWORD}';
+ALTER  USER              '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASSWORD}';
+GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'localhost';
+FLUSH PRIVILEGES;
+SQL
 info "Database '${DB_NAME}' and user '${DB_USER}' ready."
 
 # ---------------------------------------------------------------------------
-# Step 5 — Nginx (HTTP-only config — HTTPS added after Certbot in step 5a)
+# Step 5 — Nginx (HTTP-only config first; HTTPS added after Certbot in step 5a)
 # ---------------------------------------------------------------------------
 step "5 — Nginx"
 if ! command -v nginx &>/dev/null; then
@@ -154,7 +158,6 @@ NGINXCONF_HTTP
     info "Temporary HTTP config applied for ${DOMAIN}."
 else
     info "Certificate already exists — writing full HTTPS config directly."
-    _write_https_nginx_config() { :; }  # defined below; skip here
 fi
 
 # ---------------------------------------------------------------------------
@@ -179,7 +182,7 @@ else
     info "Certificate already exists for ${DOMAIN} — skipping."
 fi
 
-# Now write (or overwrite) the full HTTPS Nginx config.
+# Write (or overwrite) the full HTTPS Nginx config now that the cert exists.
 cat > "$NGINX_CONF" <<NGINXCONF_HTTPS
 # Managed by deploy/setup.sh — do not edit manually.
 
@@ -286,6 +289,7 @@ step "8 — Python virtual environment"
 VENV="${APP_DIR}/venv"
 if [[ ! -d "$VENV" ]]; then
     python3.11 -m venv "$VENV"
+    chown -R "${APP_USER}:${APP_USER}" "$VENV"
     info "Virtual environment created."
 else
     info "Virtual environment already exists — skipping creation."
@@ -293,14 +297,14 @@ fi
 
 REQUIREMENTS="${APP_DIR}/requirements.txt"
 if [[ -f "$REQUIREMENTS" ]]; then
-    "$VENV/bin/pip" install --quiet --upgrade pip
-    "$VENV/bin/pip" install --quiet -r "$REQUIREMENTS"
+    # Run pip as the application user so all installed files are owned by
+    # APP_USER from the start, avoiding root-owned files in the venv.
+    sudo -u "$APP_USER" "$VENV/bin/pip" install --quiet --upgrade pip
+    sudo -u "$APP_USER" "$VENV/bin/pip" install --quiet -r "$REQUIREMENTS"
     info "Python dependencies installed."
 else
     warn "requirements.txt not found — skipping pip install. Run manually after adding it."
 fi
-
-chown -R "${APP_USER}:${APP_USER}" "$VENV"
 
 # ---------------------------------------------------------------------------
 # Step 9 — .env file
@@ -336,10 +340,10 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Step 10 — Nginx site & systemd services
+# Step 10 & 11 — systemd services
 # ---------------------------------------------------------------------------
-step "10 & 11 — Nginx site and systemd services"
-# Nginx site was already enabled in step 5/5a. Register systemd services here.
+step "10 & 11 — systemd services"
+# Nginx site was already enabled in steps 5/5a. Register bot services here.
 SYSTEMD_DIR="${APP_DIR}/deploy/systemd"
 for SERVICE in ibkr-bot ibkr-web; do
     SRC="${SYSTEMD_DIR}/${SERVICE}.service"
@@ -358,9 +362,9 @@ done
 # Step 12 — Log rotation
 # ---------------------------------------------------------------------------
 step "12 — Log rotation"
-# Use copytruncate so Python's RotatingFileHandler file descriptors remain valid
-# after logrotate runs. The running process keeps writing to the (now truncated)
-# original file without needing a reload or restart signal.
+# Use copytruncate so Python's RotatingFileHandler file descriptors remain
+# valid after logrotate runs — the process keeps writing to the original
+# (now truncated) file without needing a reload or restart signal.
 cat > /etc/logrotate.d/ibkr-trader <<LOGROTATE
 ${APP_DIR}/logs/*.log {
     daily
@@ -378,19 +382,18 @@ info "Log rotation configured (90-day retention, copytruncate)."
 # Step 13 — UFW firewall
 # ---------------------------------------------------------------------------
 step "13 — UFW firewall"
-# Check current UFW status to avoid a full reset on re-runs, which would
-# briefly drop the SSH connection on a live server.
-UFW_STATUS=$(ufw status | head -1)
-if [[ "$UFW_STATUS" == "Status: active" ]]; then
+# Use grep to check UFW status — avoids locale-dependent string comparison
+# ("Status: active" vs "Status: actief" on non-English systems).
+if ufw status | grep -q "^Status: active"; then
     info "UFW already active — ensuring required rules exist."
 else
-    ufw --force reset > /dev/null
+    ufw --force reset   > /dev/null
     ufw default deny incoming > /dev/null
     ufw default allow outgoing > /dev/null
 fi
-ufw allow ssh    comment "SSH"    > /dev/null
-ufw allow http   comment "HTTP"   > /dev/null
-ufw allow https  comment "HTTPS"  > /dev/null
+ufw allow ssh   comment "SSH"   > /dev/null
+ufw allow http  comment "HTTP"  > /dev/null
+ufw allow https comment "HTTPS" > /dev/null
 ufw --force enable > /dev/null
 info "UFW enabled: SSH, HTTP, HTTPS allowed; all other inbound blocked."
 
@@ -420,8 +423,8 @@ info "Fail2ban configured and running."
 # ---------------------------------------------------------------------------
 step "15 — MariaDB backup cron job"
 BACKUP_SCRIPT="/usr/local/bin/ibkr-db-backup.sh"
-# Use --defaults-extra-file to avoid exposing the DB password in the process
-# list (ps aux would show it if passed as -p"password" on the command line).
+# --defaults-extra-file keeps the DB password out of the process list.
+# trap ensures the credentials temp file is always removed, even on failure.
 cat > "$BACKUP_SCRIPT" <<'BACKUP_EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -434,15 +437,16 @@ RETENTION_DAYS=30
 FILENAME="${BACKUP_DIR}/db-$(date +%Y%m%d-%H%M%S).sql.gz"
 
 DB_PASS=$(grep '^DB_PASSWORD=' "${APP_DIR}/.env" | cut -d= -f2-)
+[[ -n "$DB_PASS" ]] || { echo "ERROR: DB_PASSWORD not found in .env" >&2; exit 1; }
 
 CREDS_FILE=$(mktemp)
 chmod 600 "$CREDS_FILE"
+trap 'rm -f "$CREDS_FILE"' EXIT
+
 printf '[client]\nuser=%s\npassword=%s\n' "$DB_USER" "$DB_PASS" > "$CREDS_FILE"
 
 mysqldump --defaults-extra-file="$CREDS_FILE" \
     --single-transaction --quick "$DB_NAME" | gzip > "$FILENAME"
-
-rm -f "$CREDS_FILE"
 
 find "$BACKUP_DIR" -name 'db-*.sql.gz' -mtime +"$RETENTION_DAYS" -delete
 BACKUP_EOF
@@ -466,9 +470,9 @@ printf "║  App dir      : %-45s║\n" "${APP_DIR}"
 printf "║  DB name      : %-45s║\n" "${DB_NAME}"
 printf "║  DB user      : %-45s║\n" "${DB_USER}"
 if [[ "$FIRST_RUN" == true ]]; then
-printf "║  DB password  : %-45s║\n" "${DB_PASSWORD}"
+    printf "║  DB password  : %-45s║\n" "${DB_PASSWORD}"
 else
-printf "║  DB password  : %-45s║\n" "(unchanged — see ${ENV_FILE})"
+    printf "║  DB password  : %-45s║\n" "(unchanged — see ${ENV_FILE})"
 fi
 echo "╠══════════════════════════════════════════════════════════════╣"
 echo "║  Next steps:                                                 ║"
