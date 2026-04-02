@@ -58,16 +58,16 @@ An open-source intraday trading bot for Interactive Brokers, powered by Claude A
 ┌──────────────────────────────────────────────────────────────┐
 │                        Ubuntu Server                         │
 │                                                              │
-│   Browser ──► Nginx (reverse proxy) ──► FastAPI (backend)   │
+│   Browser ──► Nginx (reverse proxy) ──► FastAPI (backend)    │
 │                                              │               │
-│                          ┌───────────────────┤              │
+│                          ┌───────────────────┤               │
 │                          ▼                   ▼               │
 │                     MariaDB            Python Bot Core       │
 │                   (trades, logs,             │               │
 │                    config, users)    ┌───────┴────────┐      │
 │                                     ▼                ▼       │
 │                               IBKR API          Claude API   │
-│                             (TWS / IB GW)    (universe,     │
+│                             (TWS / IB GW)    (universe,      │
 │                                               signals, risk, │
 │                                               sentiment,     │
 │                                               execution)     │
