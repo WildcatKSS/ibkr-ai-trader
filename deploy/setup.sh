@@ -16,10 +16,10 @@ set -euo pipefail
 # Colour helpers
 # ---------------------------------------------------------------------------
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
-info()    { echo -e "${GREEN}[INFO]${NC}  $*"; }
-warn()    { echo -e "${YELLOW}[WARN]${NC}  $*"; }
-error()   { echo -e "${RED}[ERROR]${NC} $*" >&2; exit 1; }
-step()    { echo -e "\n${GREEN}══ Step $* ${NC}"; }
+info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
+warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
+error() { echo -e "${RED}[ERROR]${NC} $*" >&2; exit 1; }
+step()  { echo -e "\n${GREEN}══ Step $* ${NC}"; }
 
 # ---------------------------------------------------------------------------
 # Must be root
@@ -45,8 +45,23 @@ APP_DIR="/opt/ibkr-trader"
 APP_USER="trader"
 DB_NAME="ibkr_trader"
 DB_USER="ibkr_trader"
-DB_PASSWORD=$(openssl rand -base64 32 | tr -d '/+=\n' | head -c 32)
-SECRET_KEY=$(openssl rand -base64 48 | tr -d '/+=\n' | head -c 48)
+ENV_FILE="${APP_DIR}/.env"
+
+# ---------------------------------------------------------------------------
+# Resolve DB password: read from existing .env or generate a new one.
+# This ensures the summary always shows the actual password in use, and
+# prevents the DB user from getting out of sync with .env on re-runs.
+# ---------------------------------------------------------------------------
+if [[ -f "$ENV_FILE" ]]; then
+    DB_PASSWORD=$(grep '^DB_PASSWORD=' "$ENV_FILE" | cut -d= -f2-)
+    SECRET_KEY=$(grep '^SECRET_KEY=' "$ENV_FILE" | cut -d= -f2-)
+    FIRST_RUN=false
+    info "Existing .env found — reusing DB credentials."
+else
+    DB_PASSWORD=$(openssl rand -base64 32 | tr -d '/+=\n' | head -c 32)
+    SECRET_KEY=$(openssl rand -base64 48 | tr -d '/+=\n' | head -c 48)
+    FIRST_RUN=true
+fi
 
 # ---------------------------------------------------------------------------
 # Step 1 — System update
@@ -61,7 +76,7 @@ info "System packages up to date."
 # ---------------------------------------------------------------------------
 step "2 — System packages"
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-    curl wget git build-essential libssl-dev libffi-dev \
+    curl wget git rsync build-essential libssl-dev libffi-dev \
     ca-certificates gnupg lsb-release software-properties-common \
     logrotate cron ufw fail2ban unzip
 info "System packages installed."
@@ -94,15 +109,18 @@ else
     info "MariaDB already present — skipping install."
 fi
 
-# Create DB and user (idempotent)
+# Create DB and user (idempotent).
+# ALTER USER is always executed so the password stays in sync with .env
+# even if the user already existed from a previous run.
 mariadb -e "CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 mariadb -e "CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASSWORD}';"
+mariadb -e "ALTER USER '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASSWORD}';"
 mariadb -e "GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'localhost';"
 mariadb -e "FLUSH PRIVILEGES;"
 info "Database '${DB_NAME}' and user '${DB_USER}' ready."
 
 # ---------------------------------------------------------------------------
-# Step 5 — Nginx
+# Step 5 — Nginx (HTTP-only config — HTTPS added after Certbot in step 5a)
 # ---------------------------------------------------------------------------
 step "5 — Nginx"
 if ! command -v nginx &>/dev/null; then
@@ -113,9 +131,56 @@ else
     info "Nginx already present — skipping install."
 fi
 
-# Write Nginx config
 NGINX_CONF="/etc/nginx/sites-available/ibkr-trader"
-cat > "$NGINX_CONF" <<NGINXCONF
+CERT_PATH="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
+
+if [[ ! -f "$CERT_PATH" ]]; then
+    # Certificate does not exist yet — write HTTP-only config so nginx -t
+    # passes and Certbot's ACME challenge can complete in step 5a.
+    cat > "$NGINX_CONF" <<NGINXCONF_HTTP
+# Temporary HTTP-only config — replaced with HTTPS config in step 5a.
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${DOMAIN};
+
+    location /.well-known/acme-challenge/ { root /var/www/html; }
+    location / { return 301 https://\$host\$request_uri; }
+}
+NGINXCONF_HTTP
+    ln -sf "$NGINX_CONF" /etc/nginx/sites-enabled/ibkr-trader
+    rm -f /etc/nginx/sites-enabled/default
+    nginx -t && systemctl reload nginx
+    info "Temporary HTTP config applied for ${DOMAIN}."
+else
+    info "Certificate already exists — writing full HTTPS config directly."
+    _write_https_nginx_config() { :; }  # defined below; skip here
+fi
+
+# ---------------------------------------------------------------------------
+# Step 5a — Certbot / Let's Encrypt
+# ---------------------------------------------------------------------------
+step "5a — Certbot & Let's Encrypt"
+if ! command -v certbot &>/dev/null; then
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq certbot python3-certbot-nginx
+    info "Certbot installed."
+fi
+
+if [[ ! -f "$CERT_PATH" ]]; then
+    certbot certonly \
+        --webroot \
+        --webroot-path /var/www/html \
+        --non-interactive \
+        --agree-tos \
+        --email "$LE_EMAIL" \
+        -d "$DOMAIN"
+    info "Let's Encrypt certificate provisioned for ${DOMAIN}."
+else
+    info "Certificate already exists for ${DOMAIN} — skipping."
+fi
+
+# Now write (or overwrite) the full HTTPS Nginx config.
+cat > "$NGINX_CONF" <<NGINXCONF_HTTPS
 # Managed by deploy/setup.sh — do not edit manually.
 
 # HTTP → HTTPS redirect
@@ -165,37 +230,12 @@ server {
         proxy_read_timeout 300s;
     }
 }
-NGINXCONF
+NGINXCONF_HTTPS
 
 ln -sf "$NGINX_CONF" /etc/nginx/sites-enabled/ibkr-trader
 rm -f /etc/nginx/sites-enabled/default
 nginx -t && systemctl reload nginx
-info "Nginx configured for ${DOMAIN}."
-
-# ---------------------------------------------------------------------------
-# Step 5a — Certbot / Let's Encrypt
-# ---------------------------------------------------------------------------
-step "5a — Certbot & Let's Encrypt"
-if ! command -v certbot &>/dev/null; then
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq certbot python3-certbot-nginx
-    info "Certbot installed."
-fi
-
-CERT_PATH="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
-if [[ ! -f "$CERT_PATH" ]]; then
-    certbot --nginx \
-        --non-interactive \
-        --agree-tos \
-        --email "$LE_EMAIL" \
-        --redirect \
-        -d "$DOMAIN"
-    info "Let's Encrypt certificate provisioned for ${DOMAIN}."
-else
-    info "Certificate already exists for ${DOMAIN} — skipping."
-fi
-
-# Reload Nginx with final TLS config
-nginx -t && systemctl reload nginx
+info "Full HTTPS Nginx config applied for ${DOMAIN}."
 
 # ---------------------------------------------------------------------------
 # Step 6 — Node.js 20
@@ -226,7 +266,7 @@ mkdir -p \
     "${APP_DIR}/db/migrations" \
     "${APP_DIR}/backups"
 
-# Copy project files if running from repo root
+# Copy project files if running from a different location than APP_DIR.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 if [[ "$REPO_ROOT" != "$APP_DIR" ]]; then
@@ -266,8 +306,7 @@ chown -R "${APP_USER}:${APP_USER}" "$VENV"
 # Step 9 — .env file
 # ---------------------------------------------------------------------------
 step "9 — .env file"
-ENV_FILE="${APP_DIR}/.env"
-if [[ ! -f "$ENV_FILE" ]]; then
+if [[ "$FIRST_RUN" == true ]]; then
     cat > "$ENV_FILE" <<ENVFILE
 # Generated by deploy/setup.sh on $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 # Fill in your API keys below. All other settings are managed via the web interface.
@@ -293,19 +332,14 @@ ENVFILE
     chown "${APP_USER}:${APP_USER}" "$ENV_FILE"
     info ".env file created at ${ENV_FILE}."
 else
-    info ".env already exists — skipping. DB_PASSWORD not rotated."
+    info ".env already exists — credentials preserved."
 fi
 
 # ---------------------------------------------------------------------------
-# Step 10 — Enable Nginx site (already done in step 5)
+# Step 10 — Nginx site & systemd services
 # ---------------------------------------------------------------------------
-step "10 — Nginx site enabled"
-info "Already handled in step 5."
-
-# ---------------------------------------------------------------------------
-# Step 11 — systemd services
-# ---------------------------------------------------------------------------
-step "11 — systemd services"
+step "10 & 11 — Nginx site and systemd services"
+# Nginx site was already enabled in step 5/5a. Register systemd services here.
 SYSTEMD_DIR="${APP_DIR}/deploy/systemd"
 for SERVICE in ibkr-bot ibkr-web; do
     SRC="${SYSTEMD_DIR}/${SERVICE}.service"
@@ -324,6 +358,9 @@ done
 # Step 12 — Log rotation
 # ---------------------------------------------------------------------------
 step "12 — Log rotation"
+# Use copytruncate so Python's RotatingFileHandler file descriptors remain valid
+# after logrotate runs. The running process keeps writing to the (now truncated)
+# original file without needing a reload or restart signal.
 cat > /etc/logrotate.d/ibkr-trader <<LOGROTATE
 ${APP_DIR}/logs/*.log {
     daily
@@ -332,25 +369,28 @@ ${APP_DIR}/logs/*.log {
     delaycompress
     missingok
     notifempty
-    create 0640 ${APP_USER} ${APP_USER}
-    sharedscripts
-    postrotate
-        systemctl reload ibkr-bot ibkr-web > /dev/null 2>&1 || true
-    endscript
+    copytruncate
 }
 LOGROTATE
-info "Log rotation configured (90-day retention)."
+info "Log rotation configured (90-day retention, copytruncate)."
 
 # ---------------------------------------------------------------------------
 # Step 13 — UFW firewall
 # ---------------------------------------------------------------------------
 step "13 — UFW firewall"
-ufw --force reset > /dev/null
-ufw default deny incoming > /dev/null
-ufw default allow outgoing > /dev/null
-ufw allow ssh comment "SSH"
-ufw allow http comment "HTTP (redirect to HTTPS)"
-ufw allow https comment "HTTPS"
+# Check current UFW status to avoid a full reset on re-runs, which would
+# briefly drop the SSH connection on a live server.
+UFW_STATUS=$(ufw status | head -1)
+if [[ "$UFW_STATUS" == "Status: active" ]]; then
+    info "UFW already active — ensuring required rules exist."
+else
+    ufw --force reset > /dev/null
+    ufw default deny incoming > /dev/null
+    ufw default allow outgoing > /dev/null
+fi
+ufw allow ssh    comment "SSH"    > /dev/null
+ufw allow http   comment "HTTP"   > /dev/null
+ufw allow https  comment "HTTPS"  > /dev/null
 ufw --force enable > /dev/null
 info "UFW enabled: SSH, HTTP, HTTPS allowed; all other inbound blocked."
 
@@ -358,6 +398,8 @@ info "UFW enabled: SSH, HTTP, HTTPS allowed; all other inbound blocked."
 # Step 14 — Fail2ban
 # ---------------------------------------------------------------------------
 step "14 — Fail2ban"
+# nginx-limit-req jail is omitted: it requires limit_req_zone in Nginx config
+# which is not present. Only SSH and nginx-http-auth are enabled.
 cat > /etc/fail2ban/jail.d/ibkr-trader.conf <<F2B
 [sshd]
 enabled  = true
@@ -368,11 +410,6 @@ bantime  = 3600
 enabled  = true
 maxretry = 10
 bantime  = 3600
-
-[nginx-limit-req]
-enabled  = true
-maxretry = 20
-bantime  = 600
 F2B
 systemctl enable --now fail2ban
 systemctl reload fail2ban
@@ -383,23 +420,37 @@ info "Fail2ban configured and running."
 # ---------------------------------------------------------------------------
 step "15 — MariaDB backup cron job"
 BACKUP_SCRIPT="/usr/local/bin/ibkr-db-backup.sh"
-cat > "$BACKUP_SCRIPT" <<BACKUP
+# Use --defaults-extra-file to avoid exposing the DB password in the process
+# list (ps aux would show it if passed as -p"password" on the command line).
+cat > "$BACKUP_SCRIPT" <<'BACKUP_EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+
+APP_DIR="/opt/ibkr-trader"
+DB_NAME="ibkr_trader"
+DB_USER="ibkr_trader"
 BACKUP_DIR="${APP_DIR}/backups"
 RETENTION_DAYS=30
-FILENAME="\${BACKUP_DIR}/db-\$(date +%Y%m%d-%H%M%S).sql.gz"
-# Read password from .env without sourcing the whole file
-DB_PASS=\$(grep '^DB_PASSWORD=' "${APP_DIR}/.env" | cut -d= -f2-)
-mysqldump --single-transaction --quick \
-    -u "${DB_USER}" -p"\${DB_PASS}" "${DB_NAME}" | gzip > "\${FILENAME}"
-find "\${BACKUP_DIR}" -name 'db-*.sql.gz' -mtime +\${RETENTION_DAYS} -delete
-BACKUP
+FILENAME="${BACKUP_DIR}/db-$(date +%Y%m%d-%H%M%S).sql.gz"
+
+DB_PASS=$(grep '^DB_PASSWORD=' "${APP_DIR}/.env" | cut -d= -f2-)
+
+CREDS_FILE=$(mktemp)
+chmod 600 "$CREDS_FILE"
+printf '[client]\nuser=%s\npassword=%s\n' "$DB_USER" "$DB_PASS" > "$CREDS_FILE"
+
+mysqldump --defaults-extra-file="$CREDS_FILE" \
+    --single-transaction --quick "$DB_NAME" | gzip > "$FILENAME"
+
+rm -f "$CREDS_FILE"
+
+find "$BACKUP_DIR" -name 'db-*.sql.gz' -mtime +"$RETENTION_DAYS" -delete
+BACKUP_EOF
+
 chmod 750 "$BACKUP_SCRIPT"
 
-CRON_LINE="0 3 * * * root $BACKUP_SCRIPT >> ${APP_DIR}/logs/backup.log 2>&1"
 CRON_FILE="/etc/cron.d/ibkr-trader-backup"
-echo "$CRON_LINE" > "$CRON_FILE"
+echo "0 3 * * * root $BACKUP_SCRIPT >> ${APP_DIR}/logs/backup.log 2>&1" > "$CRON_FILE"
 chmod 644 "$CRON_FILE"
 info "Daily DB backup scheduled at 03:00 UTC (30-day retention)."
 
@@ -414,7 +465,11 @@ printf "║  Domain       : %-45s║\n" "${DOMAIN}"
 printf "║  App dir      : %-45s║\n" "${APP_DIR}"
 printf "║  DB name      : %-45s║\n" "${DB_NAME}"
 printf "║  DB user      : %-45s║\n" "${DB_USER}"
+if [[ "$FIRST_RUN" == true ]]; then
 printf "║  DB password  : %-45s║\n" "${DB_PASSWORD}"
+else
+printf "║  DB password  : %-45s║\n" "(unchanged — see ${ENV_FILE})"
+fi
 echo "╠══════════════════════════════════════════════════════════════╣"
 echo "║  Next steps:                                                 ║"
 echo "║  1. Fill in API keys in /opt/ibkr-trader/.env               ║"
@@ -425,4 +480,6 @@ echo "║  3. systemctl start ibkr-bot ibkr-web                       ║"
 echo "║  4. Open https://${DOMAIN}                                  ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo ""
-warn "Save the DB password above — it is stored in ${APP_DIR}/.env but shown here only once."
+if [[ "$FIRST_RUN" == true ]]; then
+    warn "Save the DB password above — it is stored in ${ENV_FILE} but shown here only once."
+fi
