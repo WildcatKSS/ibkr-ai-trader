@@ -52,8 +52,10 @@ ENV_FILE="${APP_DIR}/.env"
 # Validate that the values read are non-empty to catch corrupt/edited .env files.
 # ---------------------------------------------------------------------------
 if [[ -f "$ENV_FILE" ]]; then
-    DB_PASSWORD=$(grep '^DB_PASSWORD=' "$ENV_FILE" | cut -d= -f2-)
-    SECRET_KEY=$(grep  '^SECRET_KEY='  "$ENV_FILE" | cut -d= -f2-)
+    # Strip surrounding double quotes produced by the quoted .env format:
+    #   DB_PASSWORD="abc123"  →  cut gives  "abc123"  →  sed strips to  abc123
+    DB_PASSWORD=$(grep '^DB_PASSWORD=' "$ENV_FILE" | cut -d= -f2- | sed 's/^"//;s/"$//')
+    SECRET_KEY=$(grep  '^SECRET_KEY='  "$ENV_FILE" | cut -d= -f2- | sed 's/^"//;s/"$//')
     [[ -n "$DB_PASSWORD" ]] || error ".env exists but DB_PASSWORD is empty. Fix ${ENV_FILE} before re-running."
     [[ -n "$SECRET_KEY"  ]] || error ".env exists but SECRET_KEY is empty. Fix ${ENV_FILE} before re-running."
     FIRST_RUN=false
@@ -459,7 +461,7 @@ BACKUP_DIR="${APP_DIR}/backups"
 RETENTION_DAYS=30
 FILENAME="${BACKUP_DIR}/db-$(date +%Y%m%d-%H%M%S).sql.gz"
 
-DB_PASS=$(grep '^DB_PASSWORD=' "${APP_DIR}/.env" | cut -d= -f2-)
+DB_PASS=$(grep '^DB_PASSWORD=' "${APP_DIR}/.env" | cut -d= -f2- | sed 's/^"//;s/"$//')
 [[ -n "$DB_PASS" ]] || { echo "ERROR: DB_PASSWORD not found in .env" >&2; exit 1; }
 
 CREDS_FILE=$(mktemp)
