@@ -259,7 +259,7 @@ Web sessions expire after **30 minutes** of inactivity. This is intentionally sh
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/your-username/ibkr-ai-trader.git
+git clone https://github.com/WildcatKSS/ibkr-ai-trader.git
 cd ibkr-ai-trader
 ```
 
