@@ -1080,7 +1080,7 @@ This project is currently in the **documentation and architecture phase**. The t
 |README & architecture                                               |✅ Complete|
 |`CLAUDE.md` — Claude Code instructions                              |✅ Complete|
 |`bot/utils/logger.py` — disk-first async logging                    |✅ Complete|
-|`deploy/setup.sh` — server setup script                             |🔲 To do   |
+|`deploy/setup.sh` — server setup script                             |✅ Complete|
 |`requirements.txt`                                                  |🔲 To do   |
 |`.gitignore`                                                        |🔲 To do   |
 |`bot/core/` — trading loop & IBKR connection                        |🔲 To do   |
