@@ -65,7 +65,7 @@ An open-source intraday trading bot for Interactive Brokers, powered by Claude A
 │                     MariaDB            Python Bot Core       │
 │                   (trades, logs,             │               │
 │                    config, users)    ┌───────┴────────┐      │
-│                                     ▼                ▼       │
+│                                      ▼                ▼      │
 │                               IBKR API          Claude API   │
 │                             (TWS / IB GW)    (universe,      │
 │                                               signals, risk, │
