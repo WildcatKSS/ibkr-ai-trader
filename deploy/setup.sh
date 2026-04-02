@@ -15,7 +15,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Colour helpers
 # ---------------------------------------------------------------------------
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33d'; NC='\033[0m'
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*" >&2; exit 1; }
@@ -111,16 +111,24 @@ else
 fi
 
 # Create DB and user (idempotent).
-# SQL is passed via stdin to avoid the DB password appearing in the process
-# list (ps aux) as a command-line argument.
-mariadb <<SQL
+# SQL is written to a temp file and piped via stdin so the password never
+# appears in the process list (ps aux). Single quotes in the password are
+# doubled (SQL standard escaping: ' → '') before interpolation to prevent
+# syntax errors or injection if the password is ever manually set with special
+# characters. The temp file is removed immediately after use.
+DB_PASSWORD_SQL="${DB_PASSWORD//\'/\'\'}"
+DB_SQL_FILE=$(mktemp)
+chmod 600 "$DB_SQL_FILE"
+cat > "$DB_SQL_FILE" <<SQLEOF
 CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\`
     CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASSWORD}';
-ALTER  USER              '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASSWORD}';
+CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASSWORD_SQL}';
+ALTER  USER              '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASSWORD_SQL}';
 GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'localhost';
 FLUSH PRIVILEGES;
-SQL
+SQLEOF
+mariadb < "$DB_SQL_FILE"
+rm -f "$DB_SQL_FILE"
 info "Database '${DB_NAME}' and user '${DB_USER}' ready."
 
 # ---------------------------------------------------------------------------
@@ -181,6 +189,12 @@ if [[ ! -f "$CERT_PATH" ]]; then
 else
     info "Certificate already exists for ${DOMAIN} — skipping."
 fi
+
+# Ensure the Certbot renewal timer is active. The apt package installs it
+# automatically on Ubuntu 22.04, but an explicit enable makes this reliable.
+systemctl is-enabled certbot.timer &>/dev/null \
+    || systemctl enable --now certbot.timer
+info "Certbot renewal timer active."
 
 # Write (or overwrite) the full HTTPS Nginx config now that the cert exists.
 cat > "$NGINX_CONF" <<NGINXCONF_HTTPS
@@ -415,7 +429,9 @@ maxretry = 10
 bantime  = 3600
 F2B
 systemctl enable --now fail2ban
-systemctl reload fail2ban
+# Use fail2ban-client reload rather than systemctl reload — not all fail2ban
+# versions handle SIGHUP correctly via systemd; client reload is always safe.
+fail2ban-client reload
 info "Fail2ban configured and running."
 
 # ---------------------------------------------------------------------------
@@ -423,15 +439,19 @@ info "Fail2ban configured and running."
 # ---------------------------------------------------------------------------
 step "15 — MariaDB backup cron job"
 BACKUP_SCRIPT="/usr/local/bin/ibkr-db-backup.sh"
+# Write the backup script in two parts:
+# 1. printf injects APP_DIR, DB_NAME and DB_USER from setup variables so the
+#    script stays in sync if these values change in setup.sh.
+# 2. Quoted heredoc ('BACKUP_EOF') writes the rest verbatim — no shell
+#    expansion — so $(…) and ${…} inside execute at backup run time, not now.
 # --defaults-extra-file keeps the DB password out of the process list.
 # trap ensures the credentials temp file is always removed, even on failure.
-cat > "$BACKUP_SCRIPT" <<'BACKUP_EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-
-APP_DIR="/opt/ibkr-trader"
-DB_NAME="ibkr_trader"
-DB_USER="ibkr_trader"
+{
+    printf '#!/usr/bin/env bash\nset -euo pipefail\n\n'
+    printf 'APP_DIR="%s"\n' "$APP_DIR"
+    printf 'DB_NAME="%s"\n' "$DB_NAME"
+    printf 'DB_USER="%s"\n\n' "$DB_USER"
+    cat <<'BACKUP_EOF'
 BACKUP_DIR="${APP_DIR}/backups"
 RETENTION_DAYS=30
 FILENAME="${BACKUP_DIR}/db-$(date +%Y%m%d-%H%M%S).sql.gz"
@@ -450,6 +470,7 @@ mysqldump --defaults-extra-file="$CREDS_FILE" \
 
 find "$BACKUP_DIR" -name 'db-*.sql.gz' -mtime +"$RETENTION_DAYS" -delete
 BACKUP_EOF
+} > "$BACKUP_SCRIPT"
 
 chmod 750 "$BACKUP_SCRIPT"
 
