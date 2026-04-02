@@ -124,6 +124,41 @@ Never skip or reorder these steps.
 
 Every module uses `bot/utils/logger.py` — never use `print()` or the standard `logging` module directly.
 
+### Architecture
+
+The logger uses a two-layer write strategy to keep the trading loop fast:
+
+1. **Disk (synchronous, primary)** — every log entry is written immediately to a rotating file on disk via a `RotatingFileHandler`. This is always the first write and never blocks on DB availability.
+2. **MariaDB (asynchronous, secondary)** — a background daemon thread drains an in-process `queue.Queue` and flushes records to MariaDB. If the DB is unavailable or the queue is full, the record is silently skipped from DB (it is already on disk). The trading loop is never blocked waiting for a DB write.
+
+```
+log.info(...)
+    │
+    ├─► RotatingFileHandler  →  logs/<category>.log    (synchronous, immediate)
+    ├─► RotatingFileHandler  →  logs/errors.log        (ERROR+ only, synchronous)
+    └─► _AsyncDbHandler      →  queue → worker thread → MariaDB  (non-blocking)
+```
+
+Never call `session.add()` or any DB operation directly inside a log handler — use the async queue.
+
+### Usage
+
+```python
+from bot.utils.logger import get_logger
+
+log = get_logger("trading")
+log.info("Order placed", order_id=4821, symbol="AAPL", qty=10, price=174.50)
+log.error("Fill timeout", order_id=4821, elapsed_sec=62)
+```
+
+Keyword arguments are stored as structured fields in MariaDB and appended as `key=value` pairs to the disk log line.
+
+### Shutdown
+
+Call `bot.utils.logger.shutdown()` once during application shutdown to drain the async queue before the process exits.
+
+### Category table
+
 Each module logs to its own category:
 
 | Module             | Category    |
