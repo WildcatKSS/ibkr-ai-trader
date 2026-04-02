@@ -146,7 +146,7 @@ ibkr-ai-trader/
 │   │   └── webhook.py              # HTTP webhook dispatcher for external integrations
 │   └── utils/
 │       ├── __init__.py
-│       ├── logger.py               # Central logging setup (file + MariaDB handler)
+│       ├── logger.py               # Central logging — disk-first, async MariaDB flush
 │       ├── calendar.py             # NYSE trading calendar & market hours validation
 │       └── config.py
 ├── web/
@@ -624,7 +624,7 @@ The web interface includes a live performance dashboard with:
 
 ## Logging
 
-All bot activity is logged at **DEBUG level** by default, written simultaneously to **logfiles on disk** and **MariaDB** for full traceability and searchability via the web interface.
+All bot activity is logged at **DEBUG level** by default. Every entry is written **synchronously to disk first** (so the trading loop is never blocked), and then flushed to **MariaDB asynchronously** via a background queue for full traceability and searchability via the web interface.
 
 ### Log Categories
 
@@ -1079,6 +1079,7 @@ This project is currently in the **documentation and architecture phase**. The t
 |--------------------------------------------------------------------|----------|
 |README & architecture                                               |✅ Complete|
 |`CLAUDE.md` — Claude Code instructions                              |✅ Complete|
+|`bot/utils/logger.py` — disk-first async logging                    |✅ Complete|
 |`deploy/setup.sh` — server setup script                             |🔲 To do   |
 |`requirements.txt`                                                  |🔲 To do   |
 |`.gitignore`                                                        |🔲 To do   |
