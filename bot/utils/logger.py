@@ -186,13 +186,18 @@ class _StructuredFormatter(logging.Formatter):
 
 _async_db_handler: _AsyncDbHandler | None = None
 _loggers: dict[str, "CategoryLogger"] = {}
-_lock = threading.Lock()
+# Two separate locks: sharing one lock between get_logger() and
+# _get_async_db_handler() causes a deadlock because get_logger() holds
+# _lock while calling _build_logger(), which calls _get_async_db_handler(),
+# which then tries to re-acquire the same non-reentrant lock.
+_lock = threading.Lock()           # guards _loggers
+_db_handler_lock = threading.Lock()  # guards _async_db_handler
 
 
 def _get_async_db_handler() -> _AsyncDbHandler:
     global _async_db_handler  # noqa: PLW0603
     if _async_db_handler is None:
-        with _lock:
+        with _db_handler_lock:
             if _async_db_handler is None:
                 _async_db_handler = _AsyncDbHandler()
     return _async_db_handler
