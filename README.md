@@ -1123,7 +1123,7 @@ This project is currently in the **documentation and architecture phase**. The t
 |`bot/backtesting/` — backtesting engine                             |🔲 To do   |
 |`web/api/` — FastAPI backend                                        |🔲 To do   |
 |`web/frontend/` — management dashboard                              |🔲 To do   |
-|`db/` — MariaDB models & migrations                                 |🔲 To do   |
+|`db/` — MariaDB models, migrations & seed                           |✅ Complete|
 |`deploy/nginx/` — Nginx config                                      |🔲 To do   |
 |`deploy/systemd/` — systemd services                                |✅ Complete|
 |NYSE trading calendar                                               |🔲 To do   |
