@@ -39,6 +39,19 @@ python db/seed.py
 # Run tests
 pytest tests/
 
+# Update deployment after a git pull
+# Run from the repository clone (not from /opt/ibkr-trader)
+systemctl stop ibkr-bot ibkr-web
+git pull origin main
+rsync -a \
+    --exclude='.git' --exclude='*.lgbm' --exclude='.env' \
+    --exclude='venv/' --exclude='logs/' --exclude='backups/' \
+    ./ /opt/ibkr-trader/
+sudo -u trader /opt/ibkr-trader/venv/bin/pip install -r /opt/ibkr-trader/requirements.txt
+cd /opt/ibkr-trader && venv/bin/alembic upgrade head
+nginx -t && systemctl reload nginx
+systemctl start ibkr-bot ibkr-web
+
 # Run backtesting engine
 python -m bot.backtesting.engine --instrument AAPL --start 2024-01-01 --end 2024-12-31 --timeframe 5min
 

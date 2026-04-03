@@ -2,7 +2,7 @@
 
 An open-source intraday trading bot for Interactive Brokers, powered by Claude AI. Focused exclusively on **stocks and ETFs** — positions are opened and closed within the same trading day, with no overnight exposure.
 
-> ⚠️ **Work in progress** — This repository is in active development. The documentation, architecture, core logging module (`bot/utils/logger.py`), and server setup script (`deploy/setup.sh`) are complete. All remaining source code components are not yet implemented. See the [Development Status](#️-development-status) section for a full overview of what is done and what remains to be built.
+> ⚠️ **Work in progress** — This repository is in active development. The documentation, architecture, core logging module (`bot/utils/logger.py`), server setup script (`deploy/setup.sh`), `requirements.txt`, and `.gitignore` are complete. All remaining source code components are not yet implemented. See the [Development Status](#️-development-status) section for a full overview of what is done and what remains to be built.
 
 -----
 
@@ -84,7 +84,7 @@ An open-source intraday trading bot for Interactive Brokers, powered by Claude A
 |Web server          |Nginx (reverse proxy)                                   |
 |Backend API         |FastAPI (Python)                                        |
 |Database            |MariaDB + SQLAlchemy + Alembic (incl. all configuration)|
-|Trading API         |IBKR official API (`ibapi`)                             |
+|Trading API         |IBKR TWS API via `ib_insync`                            |
 |AI                  |Anthropic Claude API                                    |
 |News & sentiment    |Alpaca News API (primary) / Finnhub (fallback)          |
 |Signal model        |LightGBM (5-min candles, locally hosted)                |
@@ -221,9 +221,9 @@ ibkr-ai-trader/
 
 ### HTTPS with Let’s Encrypt
 
-The setup script installs Certbot and configures Nginx for **HTTPS only** from the start. HTTP (port 80) exists solely to redirect all traffic to HTTPS — no content is ever served over plain HTTP.
+During setup, `setup.sh` asks whether to use **HTTPS** (recommended for production) or **HTTP** (for local/development use).
 
-During setup you will be prompted for your domain name. Certbot then provisions a Let’s Encrypt certificate and configures Nginx automatically:
+**HTTPS mode** (production): Certbot provisions a Let’s Encrypt certificate and configures Nginx automatically. HTTP traffic on port 80 is permanently redirected to HTTPS — no content is served over plain HTTP.
 
 ```
 Nginx port 80  →  301 redirect to https://your-domain.com
@@ -231,6 +231,8 @@ Nginx port 443 →  HTTPS → FastAPI backend
 ```
 
 Certificate renewal is handled automatically via a systemd timer installed by Certbot. No manual renewal is needed.
+
+**HTTP mode** (local/development): Nginx proxies directly on port 80 with no TLS. Do not use this mode in production or for live trading.
 
 ### API Rate Limiting
 
@@ -272,24 +274,24 @@ sudo bash deploy/setup.sh
 
 The script performs the following steps automatically — and skips anything already installed:
 
-|Step|What happens                                                                         |
-|----|-------------------------------------------------------------------------------------|
-|1   |System update (`apt update && apt upgrade`)                                          |
-|2   |System packages: curl, git, build-essential, libssl-dev, etc.                        |
-|3   |Python 3.11 via deadsnakes PPA                                                       |
-|4   |MariaDB 10.11 — installed, secured, database and user created                        |
-|5   |Nginx — installed and configured as HTTPS-only reverse proxy with WebSocket support  |
-|5a  |Certbot & Let’s Encrypt — SSL certificate provisioned, HTTP→HTTPS redirect configured|
-|6   |Node.js 20 for frontend tooling                                                      |
-|7   |System user `trader` and application directories under `/opt/ibkr-trader`            |
-|8   |Python virtual environment and all packages from `requirements.txt`                  |
-|9   |`.env` file generated with random secrets pre-filled                                 |
-|10  |Nginx site config enabled, default site disabled                                     |
-|11  |Systemd services `ibkr-bot` and `ibkr-web` registered and enabled                    |
-|12  |Log rotation configured (90-day retention)                                           |
-|13  |UFW firewall — only SSH and HTTP/HTTPS allowed, everything else blocked              |
-|14  |Fail2ban — brute-force protection on SSH and Nginx                                   |
-|15  |Daily MariaDB backup cron job (30-day retention)                                     |
+|Step|What happens                                                                                      |
+|----|--------------------------------------------------------------------------------------------------|
+|1   |System update — `apt upgrade` on first install, `apt dist-upgrade` on re-runs                    |
+|2   |System packages: curl, git, build-essential, libssl-dev, etc.                                     |
+|3   |Python 3.11 via deadsnakes PPA                                                                    |
+|4   |MariaDB 10.11 — installed, secured, database and user created                                     |
+|5   |Nginx — installed and configured as reverse proxy (HTTP or HTTPS depending on your choice)        |
+|5a  |Certbot & Let’s Encrypt — HTTPS mode only: certificate provisioned, HTTP→HTTPS redirect configured|
+|6   |Node.js 20+ for frontend tooling                                                                   |
+|7   |System user `trader` and application directories under `/opt/ibkr-trader`                         |
+|8   |Python virtual environment and all packages from `requirements.txt`                               |
+|9   |`.env` file generated with random secrets pre-filled                                              |
+|10  |Nginx site config enabled, default site disabled                                                  |
+|11  |Systemd services `ibkr-bot` and `ibkr-web` registered and enabled                                |
+|12  |Log rotation configured (90-day retention)                                                        |
+|13  |UFW firewall — SSH and HTTP always open; HTTPS also opened in HTTPS mode                          |
+|14  |Fail2ban — brute-force protection on SSH and Nginx                                                |
+|15  |Daily MariaDB backup cron job (30-day retention)                                                  |
 
 At the end, the script prints the generated database password and the web interface URL.
 
@@ -327,7 +329,44 @@ systemctl start ibkr-bot ibkr-web
 Enable API access before starting the bot:
 `Edit → Global Configuration → API → Settings → Enable ActiveX and Socket Clients`
 
-The web interface is now available at `https://your-domain.com`.
+The web interface is now available at `https://your-domain.com` (HTTPS mode) or `http://your-domain.com` (HTTP mode).
+
+-----
+
+## Updating
+
+To deploy a new version of the bot on an existing Ubuntu server:
+
+```bash
+# 1. Stop the running services
+systemctl stop ibkr-bot ibkr-web
+
+# 2. Pull the latest code into the repository clone
+cd /path/to/ibkr-ai-trader     # your git clone, NOT /opt/ibkr-trader
+git pull origin main
+
+# 3. Copy updated files to the deployment directory
+#    (excludes .env, venv, logs, backups, and model files)
+rsync -a \
+    --exclude='.git' --exclude='*.lgbm' --exclude='.env' \
+    --exclude='venv/' --exclude='logs/' --exclude='backups/' \
+    ./ /opt/ibkr-trader/
+
+# 4. Install any new or updated Python dependencies
+sudo -u trader /opt/ibkr-trader/venv/bin/pip install -r /opt/ibkr-trader/requirements.txt
+
+# 5. Apply any new database migrations
+cd /opt/ibkr-trader
+venv/bin/alembic upgrade head
+
+# 6. Reload Nginx if the config changed
+nginx -t && systemctl reload nginx
+
+# 7. Restart the bot services
+systemctl start ibkr-bot ibkr-web
+```
+
+**Alternative:** if you cloned directly into `/opt/ibkr-trader`, you can run `git pull origin main` there instead of steps 2–3 (the `.env` file is excluded from git and will not be touched).
 
 -----
 
@@ -1028,11 +1067,7 @@ Dry run mode executes the full trading pipeline — universe selection, signal g
 - Validating configuration changes before applying them live
 - Demonstrating the bot’s behaviour without financial exposure
 
-Enable dry run mode via `.env` or the web interface:
-
-```env
-TRADING_MODE=dryrun    # paper | live | dryrun
-```
+Enable dry run mode via the web interface under **Settings → Trading** by switching Trading Mode to `dryrun`.
 
 In dry run mode, all actions are logged and explained exactly as they would be in live mode. The only difference is that the final IBKR order submission step is skipped.
 
@@ -1081,8 +1116,8 @@ This project is currently in the **documentation and architecture phase**. The t
 |`CLAUDE.md` — Claude Code instructions                              |✅ Complete|
 |`bot/utils/logger.py` — disk-first async logging                    |✅ Complete|
 |`deploy/setup.sh` — server setup script                             |✅ Complete|
-|`requirements.txt`                                                  |🔲 To do   |
-|`.gitignore`                                                        |🔲 To do   |
+|`requirements.txt`                                                  |✅ Complete|
+|`.gitignore`                                                        |✅ Complete|
 |`bot/core/` — trading loop & IBKR connection                        |🔲 To do   |
 |`bot/universe/` — Claude-powered stock scanner                      |🔲 To do   |
 |`bot/signals/` — signal pipeline (LightGBM → 15-min filter → Claude)|🔲 To do   |
