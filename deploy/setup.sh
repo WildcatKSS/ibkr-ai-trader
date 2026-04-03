@@ -70,8 +70,8 @@ ENV_FILE="${APP_DIR}/.env"
 if [[ -f "$ENV_FILE" ]]; then
     # Strip surrounding double quotes produced by the quoted .env format:
     #   DB_PASSWORD="abc123"  →  cut gives  "abc123"  →  sed strips to  abc123
-    DB_PASSWORD=$(grep '^DB_PASSWORD=' "$ENV_FILE" | cut -d= -f2- | sed 's/^"//;s/"$//')
-    SECRET_KEY=$(grep  '^SECRET_KEY='  "$ENV_FILE" | cut -d= -f2- | sed 's/^"//;s/"$//')
+    DB_PASSWORD=$(grep '^DB_PASSWORD=' "$ENV_FILE" | cut -d= -f2- | sed 's/^"//;s/"$//' || true)
+    SECRET_KEY=$(grep  '^SECRET_KEY='  "$ENV_FILE" | cut -d= -f2- | sed 's/^"//;s/"$//' || true)
     [[ -n "$DB_PASSWORD" ]] || error ".env exists but DB_PASSWORD is empty. Fix ${ENV_FILE} before re-running."
     [[ -n "$SECRET_KEY"  ]] || error ".env exists but SECRET_KEY is empty. Fix ${ENV_FILE} before re-running."
     FIRST_RUN=false
