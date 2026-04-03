@@ -1160,4 +1160,4 @@ Contributions are welcome once the initial codebase is in place. For now, feel f
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details.
+GNU General Public License v3.0 — see [LICENSE](LICENSE) for details.
