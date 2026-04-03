@@ -20,6 +20,7 @@ from contextlib import contextmanager
 from typing import Generator
 
 from sqlalchemy import create_engine
+from sqlalchemy.engine import URL
 from sqlalchemy.orm import Session, sessionmaker
 
 _lock = threading.Lock()
@@ -27,13 +28,19 @@ _engine = None
 _SessionLocal: sessionmaker | None = None
 
 
-def _build_url() -> str:
-    host = os.getenv("DB_HOST", "localhost")
-    port = os.getenv("DB_PORT", "3306")
-    name = os.getenv("DB_NAME", "ibkr_trader")
-    user = os.getenv("DB_USER", "ibkr_trader")
-    password = os.getenv("DB_PASSWORD", "")
-    return f"mysql+pymysql://{user}:{password}@{host}:{port}/{name}?charset=utf8mb4"
+def _build_url() -> URL:
+    # Use URL.create() so SQLAlchemy handles percent-encoding of special
+    # characters in the password (e.g. @, :, /, %).  A raw f-string would
+    # produce a malformed connection string for any such password.
+    return URL.create(
+        drivername="mysql+pymysql",
+        username=os.getenv("DB_USER", "ibkr_trader"),
+        password=os.getenv("DB_PASSWORD", ""),
+        host=os.getenv("DB_HOST", "localhost"),
+        port=int(os.getenv("DB_PORT", "3306")),
+        database=os.getenv("DB_NAME", "ibkr_trader"),
+        query={"charset": "utf8mb4"},
+    )
 
 
 def _get_session_factory() -> sessionmaker:
