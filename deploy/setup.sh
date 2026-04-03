@@ -451,8 +451,12 @@ done
 if [[ "$SERVICES_INSTALLED" == true ]]; then
     systemctl daemon-reload
     for SERVICE in ibkr-bot ibkr-web; do
-        [[ -f "/etc/systemd/system/${SERVICE}.service" ]] && systemctl enable "$SERVICE" \
-            && info "Service ${SERVICE} enabled."
+        # Use if-block, not &&-chain: a bare [[ ]] returning false would trigger
+        # set -e and abort the script when only one service file is present.
+        if [[ -f "/etc/systemd/system/${SERVICE}.service" ]]; then
+            systemctl enable "$SERVICE"
+            info "Service ${SERVICE} enabled."
+        fi
     done
 fi
 
