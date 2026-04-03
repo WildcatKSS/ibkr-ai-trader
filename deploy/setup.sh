@@ -77,8 +77,8 @@ if [[ -f "$ENV_FILE" ]]; then
     FIRST_RUN=false
     info "Existing .env found — reusing DB credentials."
 else
-    DB_PASSWORD=$(openssl rand -base64 32 | tr -d '/+=\n' | head -c 32)
-    SECRET_KEY=$(openssl rand  -base64 48 | tr -d '/+=\n' | head -c 48)
+    DB_PASSWORD=$(openssl rand -hex 16)   # 32 hex chars, 128-bit entropy, no SIGPIPE risk
+    SECRET_KEY=$(openssl rand  -hex 24)   # 48 hex chars, 192-bit entropy
     FIRST_RUN=true
 fi
 
@@ -201,7 +201,7 @@ server {
 NGINXCONF_HTTP
     ln -sf "$NGINX_CONF" /etc/nginx/sites-enabled/ibkr-trader
     rm -f /etc/nginx/sites-enabled/default
-    nginx -t && systemctl reload nginx
+    nginx -t && systemctl reload-or-restart nginx
     info "HTTP-only Nginx config applied for ${DOMAIN}."
 
 else
@@ -226,12 +226,12 @@ server {
 NGINXCONF_TMP
         ln -sf "$NGINX_CONF" /etc/nginx/sites-enabled/ibkr-trader
         rm -f /etc/nginx/sites-enabled/default
-        nginx -t && systemctl reload nginx
+        nginx -t && systemctl reload-or-restart nginx
         info "Temporary HTTP config applied for ${DOMAIN}."
     fi
 
     if ! command -v certbot &>/dev/null; then
-        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq certbot python3-certbot-nginx
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq certbot
         info "Certbot installed."
     fi
 
@@ -310,7 +310,7 @@ NGINXCONF_HTTPS
 
     ln -sf "$NGINX_CONF" /etc/nginx/sites-enabled/ibkr-trader
     rm -f /etc/nginx/sites-enabled/default
-    nginx -t && systemctl reload nginx
+    nginx -t && systemctl reload-or-restart nginx
     info "Full HTTPS Nginx config applied for ${DOMAIN}."
 fi
 
@@ -347,13 +347,17 @@ mkdir -p \
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 if [[ "$REPO_ROOT" != "$APP_DIR" ]]; then
-    rsync -a --exclude='.git' --exclude='*.lgbm' --exclude='.env' \
+    rsync -a \
+        --exclude='.git' --exclude='*.lgbm' --exclude='.env' \
+        --exclude='venv/' --exclude='logs/' --exclude='backups/' \
         "${REPO_ROOT}/" "${APP_DIR}/"
     info "Project files copied to ${APP_DIR}."
 fi
 
 chown -R "${APP_USER}:${APP_USER}" "${APP_DIR}"
-chmod 750 "${APP_DIR}"
+# 755: nginx (www-data) must be able to traverse APP_DIR to serve /static/.
+# Sensitive files are individually protected: .env is 600, owned by APP_USER.
+chmod 755 "${APP_DIR}"
 info "Directories created and ownership set."
 
 # ---------------------------------------------------------------------------
@@ -419,18 +423,25 @@ fi
 step "10 & 11 — systemd services"
 # Nginx site was already enabled in steps 5/5a. Register bot services here.
 SYSTEMD_DIR="${APP_DIR}/deploy/systemd"
+SERVICES_INSTALLED=false
 for SERVICE in ibkr-bot ibkr-web; do
     SRC="${SYSTEMD_DIR}/${SERVICE}.service"
     DST="/etc/systemd/system/${SERVICE}.service"
     if [[ -f "$SRC" ]]; then
         cp "$SRC" "$DST"
-        systemctl daemon-reload
-        systemctl enable "$SERVICE"
-        info "Service ${SERVICE} registered and enabled."
+        SERVICES_INSTALLED=true
+        info "Service file ${SERVICE}.service copied."
     else
         warn "${SRC} not found — skipping. Create deploy/systemd/${SERVICE}.service first."
     fi
 done
+if [[ "$SERVICES_INSTALLED" == true ]]; then
+    systemctl daemon-reload
+    for SERVICE in ibkr-bot ibkr-web; do
+        [[ -f "/etc/systemd/system/${SERVICE}.service" ]] && systemctl enable "$SERVICE" \
+            && info "Service ${SERVICE} enabled."
+    done
+fi
 
 # ---------------------------------------------------------------------------
 # Step 12 — Log rotation
@@ -465,11 +476,17 @@ else
     ufw default deny incoming > /dev/null
     ufw default allow outgoing > /dev/null
 fi
-ufw allow ssh   comment "SSH"   > /dev/null
-ufw allow http  comment "HTTP"  > /dev/null
-ufw allow https comment "HTTPS" > /dev/null
+ufw allow ssh  comment "SSH"  > /dev/null
+ufw allow http comment "HTTP" > /dev/null
+if [[ "$USE_HTTPS" == true ]]; then
+    ufw allow https comment "HTTPS" > /dev/null
+fi
 ufw --force enable > /dev/null
-info "UFW enabled: SSH, HTTP, HTTPS allowed; all other inbound blocked."
+if [[ "$USE_HTTPS" == true ]]; then
+    info "UFW enabled: SSH, HTTP, HTTPS allowed; all other inbound blocked."
+else
+    info "UFW enabled: SSH, HTTP allowed; all other inbound blocked."
+fi
 
 # ---------------------------------------------------------------------------
 # Step 14 — Fail2ban
