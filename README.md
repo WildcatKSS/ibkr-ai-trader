@@ -1105,8 +1105,12 @@ This project is currently in the **documentation and architecture phase**. The t
 |`CLAUDE.md` — Claude Code instructions                              |✅ Complete|
 |`bot/utils/logger.py` — disk-first async logging                    |✅ Complete|
 |`deploy/setup.sh` — server setup script                             |✅ Complete|
+|`deploy/update.sh` — server update script                           |✅ Complete|
 |`requirements.txt`                                                  |✅ Complete|
 |`.gitignore`                                                        |✅ Complete|
+|`.env.example`                                                      |✅ Complete|
+|`main.py` — application entry point                                 |🔲 To do   |
+|`config/instruments.yaml` — default instrument configuration        |🔲 To do   |
 |`bot/core/` — trading loop & IBKR connection                        |🔲 To do   |
 |`bot/universe/` — Claude-powered stock scanner                      |🔲 To do   |
 |`bot/signals/` — signal pipeline (LightGBM → 15-min filter → Claude)|🔲 To do   |
@@ -1150,10 +1154,10 @@ This project is currently in the **documentation and architecture phase**. The t
 
 ## Contributing
 
-Contributions are welcome once the initial codebase is in place. For now, feel free to open an issue to discuss ideas, report design flaws, or suggest improvements to the architecture. See <CONTRIBUTING.md> for guidelines once available.
+Contributions are welcome once the initial codebase is in place. For now, feel free to open an issue to discuss ideas, report design flaws, or suggest improvements to the architecture. A CONTRIBUTING.md will be added once the initial codebase is in place.
 
 -----
 
 ## License
 
-MIT License — see <LICENSE> for details.
+MIT License — see [LICENSE](LICENSE) for details.
