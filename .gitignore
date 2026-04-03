@@ -1,0 +1,66 @@
+# =============================================================================
+# .gitignore — IBKR AI Trader
+# =============================================================================
+
+# ── Secrets & environment ─────────────────────────────────────────────────────
+.env
+*.env
+.env.*
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+*.whl
+
+# ── Virtual environment ───────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+
+# ── LightGBM model files ──────────────────────────────────────────────────────
+# Generated locally by bot/ml/trainer.py — never commit; restore via --retrain
+*.lgbm
+bot/ml/models/
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+logs/
+*.log
+
+# ── Database ──────────────────────────────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+
+# ── Backups ───────────────────────────────────────────────────────────────────
+backups/
+
+# ── IDE & editor ──────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ── Testing & coverage ────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# ── Alembic ───────────────────────────────────────────────────────────────────
+# Migration files ARE committed — only exclude generated artefacts
+alembic.ini.bak
+
+# ── Node (frontend build artefacts) ───────────────────────────────────────────
+node_modules/
+web/frontend/dist/
+web/frontend/build/

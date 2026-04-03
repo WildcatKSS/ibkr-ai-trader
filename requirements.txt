@@ -1,0 +1,60 @@
+# =============================================================================
+# requirements.txt — IBKR AI Trader
+# Python 3.11 · Ubuntu 22.04 LTS
+# =============================================================================
+
+# ── Web framework ─────────────────────────────────────────────────────────────
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9        # form/file upload support
+itsdangerous>=2.2.0            # session signing
+
+# ── Authentication ────────────────────────────────────────────────────────────
+python-jose[cryptography]>=3.3.0   # JWT tokens
+passlib[bcrypt]>=1.7.4             # password hashing
+pyotp>=2.9.0                       # TOTP for optional 2FA
+
+# ── Database ──────────────────────────────────────────────────────────────────
+sqlalchemy>=2.0.0
+alembic>=1.13.0
+PyMySQL>=1.1.0                 # MariaDB/MySQL connector (pure Python, no system lib needed)
+cryptography>=42.0.0           # required by PyMySQL for SSL connections
+
+# ── Data & machine learning ───────────────────────────────────────────────────
+numpy>=1.26.0
+pandas>=2.2.0
+lightgbm>=4.3.0
+scikit-learn>=1.4.0            # preprocessing and feature utilities used by LightGBM pipeline
+pandas-ta>=0.3.14b             # technical indicators (bot/signals/indicators.py)
+
+# ── IBKR API ──────────────────────────────────────────────────────────────────
+ib_insync>=0.9.86              # async TWS / IB Gateway API wrapper
+
+# ── Claude API ────────────────────────────────────────────────────────────────
+anthropic>=0.25.0
+
+# ── Market data & news ────────────────────────────────────────────────────────
+alpaca-py>=0.21.0              # Alpaca News API (primary news provider)
+finnhub-python>=2.4.19         # Finnhub (fallback news provider)
+
+# ── Trading calendar ──────────────────────────────────────────────────────────
+# NYSE trading calendar — imported exclusively via bot/utils/calendar.py
+trading_calendars>=2.1.1
+
+# ── HTTP & async I/O ──────────────────────────────────────────────────────────
+httpx>=0.27.0                  # async HTTP client (webhook delivery, external API calls)
+aiofiles>=23.2.1               # async file I/O
+
+# ── Task scheduling ───────────────────────────────────────────────────────────
+APScheduler>=3.10.0            # intraday scheduled jobs (EOD close, universe scan, etc.)
+
+# ── Reporting & export ────────────────────────────────────────────────────────
+openpyxl>=3.1.0                # Excel export from trade history
+
+# ── Environment ───────────────────────────────────────────────────────────────
+python-dotenv>=1.0.0           # loads /opt/ibkr-trader/.env at startup
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+pytest>=8.1.0
+pytest-asyncio>=0.23.0
+pytest-mock>=3.14.0
