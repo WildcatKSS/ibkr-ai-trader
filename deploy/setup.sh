@@ -576,6 +576,9 @@ info "Daily DB backup scheduled at 03:00 UTC (30-day retention)."
 # =============================================================================
 # Summary
 # =============================================================================
+# Detect the server's primary IP address for display in the summary.
+SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+
 echo ""
 echo "╔══════════════════════════════════════════════════════════════╗"
 echo "║                    Setup complete!                           ║"
@@ -598,8 +601,14 @@ echo "║         venv/bin/python db/seed.py                          ║"
 echo "║  3. systemctl start ibkr-bot ibkr-web                       ║"
 if [[ "$USE_HTTPS" == true ]]; then
     printf "║  4. Open https://%-44s║\n" "${DOMAIN}"
+    if [[ -n "$SERVER_IP" ]]; then
+        printf "║     IP addr  %-48s║\n" "${SERVER_IP}  (HTTPS only via domain)"
+    fi
 else
     printf "║  4. Open http://%-45s║\n" "${DOMAIN}"
+    if [[ -n "$SERVER_IP" ]]; then
+        printf "║     or      http://%-42s║\n" "${SERVER_IP}"
+    fi
 fi
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo ""
