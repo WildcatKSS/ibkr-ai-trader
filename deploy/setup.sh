@@ -87,8 +87,16 @@ fi
 # ---------------------------------------------------------------------------
 step "1 — System update"
 apt-get update -qq
-DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq
-info "System packages up to date."
+if [[ "$FIRST_RUN" == true ]]; then
+    # First install: conservative upgrade — never removes or replaces packages.
+    DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq
+    info "System packages up to date (initial upgrade)."
+else
+    # Maintenance re-run: dist-upgrade resolves changed dependencies
+    # (e.g. kernel updates, replaced packages) without full-release upgrades.
+    DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade -y -qq
+    info "System packages up to date (dist-upgrade)."
+fi
 
 # ---------------------------------------------------------------------------
 # Step 2 — System packages
@@ -318,12 +326,17 @@ fi
 # Step 6 — Node.js 20
 # ---------------------------------------------------------------------------
 step "6 — Node.js 20"
-if ! command -v node &>/dev/null || [[ "$(node --version | cut -d. -f1)" != "v20" ]]; then
+# Install only when Node is missing or older than v20. If v20 or higher is
+# already present (including v21, v22, …) we leave it in place — a newer
+# version is compatible with the frontend build tooling used in this project.
+NODE_MAJOR=0
+command -v node &>/dev/null && NODE_MAJOR=$(node --version | cut -d. -f1 | tr -d 'v')
+if [[ "$NODE_MAJOR" -lt 20 ]]; then
     curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nodejs
     info "Node.js $(node --version) installed."
 else
-    info "Node.js $(node --version) already present — skipping."
+    info "Node.js $(node --version) already present (>= v20) — skipping."
 fi
 
 # ---------------------------------------------------------------------------
