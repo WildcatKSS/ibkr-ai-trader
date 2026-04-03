@@ -2,7 +2,7 @@
 
 An open-source intraday trading bot for Interactive Brokers, powered by Claude AI. Focused exclusively on **stocks and ETFs** — positions are opened and closed within the same trading day, with no overnight exposure.
 
-> ⚠️ **Work in progress** — This repository is in active development. The documentation, architecture, core logging module (`bot/utils/logger.py`), server setup script (`deploy/setup.sh`), `requirements.txt`, and `.gitignore` are complete. All remaining source code components are not yet implemented. See the [Development Status](#️-development-status) section for a full overview of what is done and what remains to be built. **Contributions are welcome** — see [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
+> ⚠️ **Work in progress** — This repository is in active development. The infrastructure layer is complete: logging, configuration, database models, migrations, seed data, server setup and update scripts, systemd services, and a full test suite. All trading and web application components are not yet implemented. See the [Development Status](#️-development-status) section for a full overview. **Contributions are welcome** — see [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
 
 -----
 
@@ -1104,6 +1104,8 @@ This project is currently in the **documentation and architecture phase**. The t
 |README & architecture                                               |✅ Complete|
 |`CLAUDE.md` — Claude Code instructions                              |✅ Complete|
 |`bot/utils/logger.py` — disk-first async logging                    |✅ Complete|
+|`bot/utils/config.py` — MariaDB settings loader with TTL cache      |✅ Complete|
+|`tests/` — test suite (76 tests, SQLite fixtures, no real API calls) |✅ Complete|
 |`deploy/setup.sh` — server setup script                             |✅ Complete|
 |`deploy/update.sh` — server update script                           |✅ Complete|
 |`requirements.txt`                                                  |✅ Complete|
@@ -1124,6 +1126,7 @@ This project is currently in the **documentation and architecture phase**. The t
 |`web/api/` — FastAPI backend                                        |🔲 To do   |
 |`web/frontend/` — management dashboard                              |🔲 To do   |
 |`db/` — MariaDB models, migrations & seed                           |✅ Complete|
+|`alembic.ini` — Alembic migration configuration                     |✅ Complete|
 |`deploy/nginx/` — Nginx config                                      |🔲 To do   |
 |`deploy/systemd/` — systemd services                                |✅ Complete|
 |NYSE trading calendar                                               |🔲 To do   |

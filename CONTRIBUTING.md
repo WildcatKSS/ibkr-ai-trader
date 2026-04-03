@@ -15,9 +15,9 @@ If you want to build something substantial (a new module, a change to the signal
 ## What you can contribute
 
 ### Good first contributions
-- Bug reports and bug fixes in existing files (`deploy/setup.sh`, `deploy/update.sh`, `bot/utils/logger.py`)
+- Bug reports and bug fixes in existing files (`deploy/setup.sh`, `deploy/update.sh`, `bot/utils/logger.py`, `bot/utils/config.py`)
+- Additional tests for existing modules in `tests/` — the suite uses in-memory SQLite and mocks, no real services needed
 - Improvements to documentation (README, CLAUDE.md, inline comments)
-- Missing test coverage for existing modules
 - Security findings — see [Reporting a vulnerability](#reporting-a-vulnerability)
 
 ### Larger contributions

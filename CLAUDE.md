@@ -112,7 +112,7 @@ All other operational settings (risk parameters, position sizing, universe selec
 
 ## Signal Pipeline — exact order
 
-1. `bot/signals/indicators.py` — calculate pandas-ta indicators on 5-min candles
+1. `bot/signals/indicators.py` — calculate ta indicators on 5-min candles
 1. `bot/ml/model.py` — LightGBM prediction (long / short / no trade)
 1. `bot/signals/generator.py` — 15-min confirmation filter (both timeframes must agree)
 1. Claude API call — context, sentiment, final decision, entry/target/stop, explanation
