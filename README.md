@@ -1124,7 +1124,7 @@ This project is currently in the **documentation and architecture phase**. The t
 |`web/frontend/` — management dashboard                              |🔲 To do   |
 |`db/` — MariaDB models & migrations                                 |🔲 To do   |
 |`deploy/nginx/` — Nginx config                                      |🔲 To do   |
-|`deploy/systemd/` — systemd services                                |🔲 To do   |
+|`deploy/systemd/` — systemd services                                |✅ Complete|
 |NYSE trading calendar                                               |🔲 To do   |
 |Order fill monitoring & timeout logic                               |🔲 To do   |
 |Slippage & commission simulation in backtesting                     |🔲 To do   |

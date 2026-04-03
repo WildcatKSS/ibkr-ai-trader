@@ -1,0 +1,34 @@
+[Unit]
+Description=IBKR AI Trader — Web Interface (FastAPI)
+Documentation=https://github.com/WildcatKSS/ibkr-ai-trader
+After=network-online.target mariadb.service
+Wants=network-online.target
+Requires=mariadb.service
+
+[Service]
+Type=simple
+User=trader
+Group=trader
+WorkingDirectory=/opt/ibkr-trader
+EnvironmentFile=/opt/ibkr-trader/.env
+ExecStart=/opt/ibkr-trader/venv/bin/uvicorn web.api.main:app \
+    --host 127.0.0.1 \
+    --port 8000 \
+    --workers 2 \
+    --log-level warning \
+    --no-access-log
+
+# Restart quickly on failure; the web interface is stateless.
+Restart=on-failure
+RestartSec=5
+
+# Allow up to 30 seconds for in-flight requests to complete on shutdown.
+TimeoutStopSec=30
+
+# Logging goes to journald; use: journalctl -u ibkr-web -f
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ibkr-web
+
+[Install]
+WantedBy=multi-user.target

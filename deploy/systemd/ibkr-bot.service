@@ -1,0 +1,36 @@
+[Unit]
+Description=IBKR AI Trading Bot
+Documentation=https://github.com/WildcatKSS/ibkr-ai-trader
+After=network-online.target mariadb.service
+Wants=network-online.target
+Requires=mariadb.service
+
+[Service]
+Type=simple
+User=trader
+Group=trader
+WorkingDirectory=/opt/ibkr-trader
+EnvironmentFile=/opt/ibkr-trader/.env
+ExecStart=/opt/ibkr-trader/venv/bin/python -m bot.core
+ExecStop=/bin/kill -SIGTERM $MAINPID
+
+# Restart on unexpected failure, but not when the process exits cleanly
+# (e.g. end-of-day shutdown). A 30-second delay prevents rapid restart
+# loops from hammering IBKR or triggering circuit breakers.
+Restart=on-failure
+RestartSec=30
+
+# Cap at 3 restarts per 5 minutes to prevent runaway restart loops.
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+# Allow up to 60 seconds for clean shutdown (EOD close routine).
+TimeoutStopSec=60
+
+# Logging goes to journald; use: journalctl -u ibkr-bot -f
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ibkr-bot
+
+[Install]
+WantedBy=multi-user.target
