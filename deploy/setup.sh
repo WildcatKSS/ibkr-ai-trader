@@ -38,8 +38,24 @@ echo ""
 read -rp "Enter your domain name (e.g. trader.example.com): " DOMAIN
 [[ -n "$DOMAIN" ]] || error "Domain name cannot be empty."
 
-read -rp "Enter your email address (for Let's Encrypt): " LE_EMAIL
-[[ -n "$LE_EMAIL" ]] || error "Email address cannot be empty."
+echo ""
+echo "Use HTTPS (requires a public server with DNS pointing to this machine)"
+echo "or HTTP (for local/development use)?"
+echo ""
+echo "  1) HTTPS — Let's Encrypt certificate (production)"
+echo "  2) HTTP  — No certificate, plain HTTP (local / development)"
+echo ""
+read -rp "Choice [1/2]: " PROTOCOL_CHOICE
+case "$PROTOCOL_CHOICE" in
+    1) USE_HTTPS=true  ;;
+    2) USE_HTTPS=false ;;
+    *) error "Invalid choice. Enter 1 for HTTPS or 2 for HTTP." ;;
+esac
+
+if [[ "$USE_HTTPS" == true ]]; then
+    read -rp "Enter your email address (for Let's Encrypt): " LE_EMAIL
+    [[ -n "$LE_EMAIL" ]] || error "Email address cannot be empty."
+fi
 
 APP_DIR="/opt/ibkr-trader"
 APP_USER="trader"
@@ -137,7 +153,7 @@ rm -f "$DB_SQL_FILE"
 info "Database '${DB_NAME}' and user '${DB_USER}' ready."
 
 # ---------------------------------------------------------------------------
-# Step 5 — Nginx (HTTP-only config first; HTTPS added after Certbot in step 5a)
+# Step 5 — Nginx
 # ---------------------------------------------------------------------------
 step "5 — Nginx"
 if ! command -v nginx &>/dev/null; then
@@ -151,11 +167,54 @@ fi
 NGINX_CONF="/etc/nginx/sites-available/ibkr-trader"
 CERT_PATH="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
 
-if [[ ! -f "$CERT_PATH" ]]; then
-    # Certificate does not exist yet — write HTTP-only config so nginx -t
-    # passes and Certbot's ACME challenge can complete in step 5a.
+if [[ "$USE_HTTPS" == false ]]; then
+    # ---------------------------------------------------------------------------
+    # HTTP mode — plain HTTP config, no certificate
+    # ---------------------------------------------------------------------------
     cat > "$NGINX_CONF" <<NGINXCONF_HTTP
-# Temporary HTTP-only config — replaced with HTTPS config in step 5a.
+# Managed by deploy/setup.sh — HTTP mode (no TLS).
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${DOMAIN};
+
+    # Static frontend files
+    location /static/ {
+        alias ${APP_DIR}/web/frontend/static/;
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # FastAPI backend (with WebSocket support)
+    location / {
+        proxy_pass         http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header   Upgrade \$http_upgrade;
+        proxy_set_header   Connection "upgrade";
+        proxy_set_header   Host \$host;
+        proxy_set_header   X-Real-IP \$remote_addr;
+        proxy_set_header   X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 300s;
+    }
+}
+NGINXCONF_HTTP
+    ln -sf "$NGINX_CONF" /etc/nginx/sites-enabled/ibkr-trader
+    rm -f /etc/nginx/sites-enabled/default
+    nginx -t && systemctl reload nginx
+    info "HTTP-only Nginx config applied for ${DOMAIN}."
+
+else
+    # ---------------------------------------------------------------------------
+    # Step 5a — Certbot / Let's Encrypt (HTTPS mode only)
+    # ---------------------------------------------------------------------------
+    step "5a — Certbot & Let's Encrypt"
+
+    # Write temporary HTTP-only config so nginx -t passes and the ACME
+    # challenge can complete before the certificate exists.
+    if [[ ! -f "$CERT_PATH" ]]; then
+        cat > "$NGINX_CONF" <<NGINXCONF_TMP
+# Temporary HTTP-only config — replaced with HTTPS config after Certbot.
 server {
     listen 80;
     listen [::]:80;
@@ -164,45 +223,40 @@ server {
     location /.well-known/acme-challenge/ { root /var/www/html; }
     location / { return 301 https://\$host\$request_uri; }
 }
-NGINXCONF_HTTP
-    ln -sf "$NGINX_CONF" /etc/nginx/sites-enabled/ibkr-trader
-    rm -f /etc/nginx/sites-enabled/default
-    nginx -t && systemctl reload nginx
-    info "Temporary HTTP config applied for ${DOMAIN}."
-else
-    info "Certificate already exists — writing full HTTPS config directly."
-fi
+NGINXCONF_TMP
+        ln -sf "$NGINX_CONF" /etc/nginx/sites-enabled/ibkr-trader
+        rm -f /etc/nginx/sites-enabled/default
+        nginx -t && systemctl reload nginx
+        info "Temporary HTTP config applied for ${DOMAIN}."
+    fi
 
-# ---------------------------------------------------------------------------
-# Step 5a — Certbot / Let's Encrypt
-# ---------------------------------------------------------------------------
-step "5a — Certbot & Let's Encrypt"
-if ! command -v certbot &>/dev/null; then
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq certbot python3-certbot-nginx
-    info "Certbot installed."
-fi
+    if ! command -v certbot &>/dev/null; then
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq certbot python3-certbot-nginx
+        info "Certbot installed."
+    fi
 
-if [[ ! -f "$CERT_PATH" ]]; then
-    certbot certonly \
-        --webroot \
-        --webroot-path /var/www/html \
-        --non-interactive \
-        --agree-tos \
-        --email "$LE_EMAIL" \
-        -d "$DOMAIN"
-    info "Let's Encrypt certificate provisioned for ${DOMAIN}."
-else
-    info "Certificate already exists for ${DOMAIN} — skipping."
-fi
+    mkdir -p /var/www/html
 
-# Ensure the Certbot renewal timer is active. The apt package installs it
-# automatically on Ubuntu 22.04, but an explicit enable makes this reliable.
-systemctl is-enabled certbot.timer &>/dev/null \
-    || systemctl enable --now certbot.timer
-info "Certbot renewal timer active."
+    if [[ ! -f "$CERT_PATH" ]]; then
+        certbot certonly \
+            --webroot \
+            --webroot-path /var/www/html \
+            --non-interactive \
+            --agree-tos \
+            --email "$LE_EMAIL" \
+            -d "$DOMAIN"
+        info "Let's Encrypt certificate provisioned for ${DOMAIN}."
+    else
+        info "Certificate already exists for ${DOMAIN} — skipping."
+    fi
 
-# Write (or overwrite) the full HTTPS Nginx config now that the cert exists.
-cat > "$NGINX_CONF" <<NGINXCONF_HTTPS
+    # Ensure the Certbot renewal timer is active.
+    systemctl is-enabled certbot.timer &>/dev/null \
+        || systemctl enable --now certbot.timer
+    info "Certbot renewal timer active."
+
+    # Write (or overwrite) the full HTTPS Nginx config.
+    cat > "$NGINX_CONF" <<NGINXCONF_HTTPS
 # Managed by deploy/setup.sh — do not edit manually.
 
 # HTTP → HTTPS redirect
@@ -254,10 +308,11 @@ server {
 }
 NGINXCONF_HTTPS
 
-ln -sf "$NGINX_CONF" /etc/nginx/sites-enabled/ibkr-trader
-rm -f /etc/nginx/sites-enabled/default
-nginx -t && systemctl reload nginx
-info "Full HTTPS Nginx config applied for ${DOMAIN}."
+    ln -sf "$NGINX_CONF" /etc/nginx/sites-enabled/ibkr-trader
+    rm -f /etc/nginx/sites-enabled/default
+    nginx -t && systemctl reload nginx
+    info "Full HTTPS Nginx config applied for ${DOMAIN}."
+fi
 
 # ---------------------------------------------------------------------------
 # Step 6 — Node.js 20
@@ -507,7 +562,11 @@ echo "║  2. Run: cd /opt/ibkr-trader                                ║"
 echo "║         venv/bin/alembic upgrade head                       ║"
 echo "║         venv/bin/python db/seed.py                          ║"
 echo "║  3. systemctl start ibkr-bot ibkr-web                       ║"
-echo "║  4. Open https://${DOMAIN}                                  ║"
+if [[ "$USE_HTTPS" == true ]]; then
+    printf "║  4. Open https://%-44s║\n" "${DOMAIN}"
+else
+    printf "║  4. Open http://%-45s║\n" "${DOMAIN}"
+fi
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo ""
 if [[ "$FIRST_RUN" == true ]]; then
