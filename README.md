@@ -335,38 +335,27 @@ The web interface is now available at `https://your-domain.com` (HTTPS mode) or 
 
 ## Updating
 
-To deploy a new version of the bot on an existing Ubuntu server:
+To deploy a new version of the bot on an existing Ubuntu server, use the included update script:
 
 ```bash
-# 1. Stop the running services
-systemctl stop ibkr-bot ibkr-web
-
-# 2. Pull the latest code into the repository clone
-cd /path/to/ibkr-ai-trader     # your git clone, NOT /opt/ibkr-trader
-git pull origin main
-
-# 3. Copy updated files to the deployment directory
-#    (excludes .env, venv, logs, backups, and model files)
-rsync -a \
-    --exclude='.git' --exclude='*.lgbm' --exclude='.env' \
-    --exclude='venv/' --exclude='logs/' --exclude='backups/' \
-    ./ /opt/ibkr-trader/
-
-# 4. Install any new or updated Python dependencies
-sudo -u trader /opt/ibkr-trader/venv/bin/pip install -r /opt/ibkr-trader/requirements.txt
-
-# 5. Apply any new database migrations
-cd /opt/ibkr-trader
-venv/bin/alembic upgrade head
-
-# 6. Reload Nginx if the config changed
-nginx -t && systemctl reload nginx
-
-# 7. Restart the bot services
-systemctl start ibkr-bot ibkr-web
+sudo bash deploy/update.sh
 ```
 
-**Alternative:** if you cloned directly into `/opt/ibkr-trader`, you can run `git pull origin main` there instead of steps 2–3 (the `.env` file is excluded from git and will not be touched).
+The script performs all steps automatically and safely:
+
+|Step|What happens                                                              |
+|----|--------------------------------------------------------------------------|
+|1   |`ibkr-bot` and `ibkr-web` are stopped                                    |
+|2   |`git pull origin main` — fetches the latest code                          |
+|3   |Files are synced to `/opt/ibkr-trader` (`.env`, `venv`, `logs` untouched) |
+|4   |New or updated Python dependencies are installed                          |
+|5   |Pending database migrations are applied via Alembic                       |
+|6   |Nginx is reloaded                                                         |
+|7   |`ibkr-bot` and `ibkr-web` are restarted                                  |
+
+**Safety:** if any step fails, the services are automatically restarted with the previous version — the server is never left in a stopped state.
+
+> ⚠ Do not run this during an active trading session. The bot is stopped for the duration of the update.
 
 -----
 
