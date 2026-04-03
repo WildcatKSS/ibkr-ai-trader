@@ -2,7 +2,7 @@
 
 An open-source intraday trading bot for Interactive Brokers, powered by Claude AI. Focused exclusively on **stocks and ETFs** — positions are opened and closed within the same trading day, with no overnight exposure.
 
-> ⚠️ **Work in progress** — This repository is in active development. The documentation, architecture, core logging module (`bot/utils/logger.py`), server setup script (`deploy/setup.sh`), `requirements.txt`, and `.gitignore` are complete. All remaining source code components are not yet implemented. See the [Development Status](#️-development-status) section for a full overview of what is done and what remains to be built.
+> ⚠️ **Work in progress** — This repository is in active development. The documentation, architecture, core logging module (`bot/utils/logger.py`), server setup script (`deploy/setup.sh`), `requirements.txt`, and `.gitignore` are complete. All remaining source code components are not yet implemented. See the [Development Status](#️-development-status) section for a full overview of what is done and what remains to be built. **Contributions are welcome** — see [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
 
 -----
 
@@ -1109,6 +1109,7 @@ This project is currently in the **documentation and architecture phase**. The t
 |`requirements.txt`                                                  |✅ Complete|
 |`.gitignore`                                                        |✅ Complete|
 |`.env.example`                                                      |✅ Complete|
+|`CONTRIBUTING.md`                                                   |✅ Complete|
 |`main.py` — application entry point                                 |🔲 To do   |
 |`config/instruments.yaml` — default instrument configuration        |🔲 To do   |
 |`bot/core/` — trading loop & IBKR connection                        |🔲 To do   |
@@ -1154,7 +1155,7 @@ This project is currently in the **documentation and architecture phase**. The t
 
 ## Contributing
 
-Contributions are welcome once the initial codebase is in place. For now, feel free to open an issue to discuss ideas, report design flaws, or suggest improvements to the architecture. A CONTRIBUTING.md will be added once the initial codebase is in place.
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on setting up a development environment, the branching workflow, code style requirements, and how to report security vulnerabilities.
 
 -----
 
