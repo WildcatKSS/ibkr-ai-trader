@@ -6,11 +6,11 @@
 # ── Web framework ─────────────────────────────────────────────────────────────
 fastapi>=0.111.0
 uvicorn[standard]>=0.29.0
-python-multipart>=0.0.9        # form/file upload support
+python-multipart>=0.0.18       # form/file upload support (>=0.0.18 fixes ReDoS GHSA-2jv5-9r88-3w3p)
 itsdangerous>=2.2.0            # session signing
 
 # ── Authentication ────────────────────────────────────────────────────────────
-python-jose[cryptography]>=3.3.0   # JWT tokens
+PyJWT[crypto]>=2.8.0               # JWT tokens (replaces python-jose, which has unpatched GHSA-cjwg-qfpm-7377)
 passlib[bcrypt]>=1.7.4             # password hashing
 pyotp>=2.9.0                       # TOTP for optional 2FA
 
