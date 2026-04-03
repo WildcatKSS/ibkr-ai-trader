@@ -226,4 +226,4 @@ All ERROR and CRITICAL entries are also written to `logs/errors.log` automatical
 - Do not change `TRADING_MODE` logic without updating all three paths: paper, live, dryrun
 - Do not make Claude API calls from inside `bot/ml/` — that module is ML only
 - Do not add dependencies without adding them to `requirements.txt`
-- The NYSE trading calendar uses the `trading_calendars` library — ensure it is in `requirements.txt` and imported via `bot/utils/calendar.py` only
+- The NYSE trading calendar uses the `exchange_calendars` library (the maintained fork of the abandoned `trading_calendars`) — ensure it is in `requirements.txt` and imported via `bot/utils/calendar.py` only
