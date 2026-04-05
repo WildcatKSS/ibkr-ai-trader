@@ -136,13 +136,16 @@ async def update_setting(key: str, value: str) -> dict:
     from db.session import get_session
     from db.models import Setting
 
+    now = datetime.now(tz=timezone.utc)
+
     with get_session() as session:
         obj = session.get(Setting, key)
         if obj is None:
-            obj = Setting(key=key, value=value)
+            obj = Setting(key=key, value=value, updated_at=now)
             session.add(obj)
         else:
             obj.value = value
+            obj.updated_at = now
 
     reload()
     log.info("Setting updated", key=key)
