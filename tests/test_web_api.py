@@ -6,6 +6,10 @@ All DB and config calls are mocked — no MariaDB connection needed.
 
 Because route handlers import dependencies locally (inside the function body),
 patches must target the source module, not web.api.main.
+
+Auth is bypassed via app.dependency_overrides so each test class stays
+focused on the route logic rather than the authentication layer.
+Auth itself is tested in test_auth.py.
 """
 
 from __future__ import annotations
@@ -16,13 +20,23 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+from web.api.auth import require_auth
 from web.api.main import app
+
+
+@pytest.fixture(autouse=True)
+def bypass_auth():
+    """Skip JWT validation for all tests in this module."""
+    app.dependency_overrides[require_auth] = lambda: None
+    yield
+    app.dependency_overrides.clear()
+
 
 client = TestClient(app)
 
 
 # ---------------------------------------------------------------------------
-# /health
+# /health  (public — no auth)
 # ---------------------------------------------------------------------------
 
 
@@ -38,7 +52,7 @@ class TestHealth:
     def test_includes_timestamp(self):
         data = client.get("/health").json()
         assert "timestamp" in data
-        assert data["timestamp"]  # non-empty string
+        assert data["timestamp"]
 
 
 # ---------------------------------------------------------------------------
@@ -47,7 +61,6 @@ class TestHealth:
 
 
 def _status_patches(trading_mode="dryrun", market_open=False, trading_day=True):
-    """Enter three patches needed for /api/status into an ExitStack."""
     stack = ExitStack()
     stack.enter_context(patch("bot.utils.config.get", return_value=trading_mode))
     stack.enter_context(patch("bot.utils.calendar.is_market_open", return_value=market_open))
@@ -83,6 +96,14 @@ class TestStatus:
             data = client.get("/api/status").json()
         assert data["market_open"] is True
 
+    def test_requires_auth_when_no_override(self):
+        """Without the bypass, the route must reject unauthenticated requests."""
+        app.dependency_overrides.clear()
+        response = client.get("/api/status")
+        assert response.status_code == 401  # HTTPBearer returns 401 when header absent
+        # Restore for subsequent tests in this class.
+        app.dependency_overrides[require_auth] = lambda: None
+
 
 # ---------------------------------------------------------------------------
 # /api/settings  GET
@@ -106,6 +127,12 @@ class TestListSettings:
             data = client.get("/api/settings").json()
         assert data == {}
 
+    def test_requires_auth_when_no_override(self):
+        app.dependency_overrides.clear()
+        response = client.get("/api/settings")
+        assert response.status_code == 401
+        app.dependency_overrides[require_auth] = lambda: None
+
 
 # ---------------------------------------------------------------------------
 # /api/settings  PUT
@@ -113,7 +140,6 @@ class TestListSettings:
 
 
 def _make_session_cm(existing_value=MagicMock()):
-    """Return a context-manager mock for get_session()."""
     mock_session = MagicMock()
     mock_session.get.return_value = existing_value
     cm = MagicMock()
@@ -150,8 +176,6 @@ class TestUpdateSetting:
         ):
             response = client.put("/api/settings/NEW_KEY?value=hello")
         assert response.status_code == 200
-        # add() is called at least once for the new Setting row.
-        # (The async logger may add a LogEntry on the same session mock too.)
         from db.models import Setting
         added_types = [type(c.args[0]) for c in mock_session.add.call_args_list]
         assert Setting in added_types
@@ -166,6 +190,12 @@ class TestUpdateSetting:
         ):
             client.put("/api/settings/TRADING_MODE?value=live")
         assert existing.value == "live"
+
+    def test_requires_auth_when_no_override(self):
+        app.dependency_overrides.clear()
+        response = client.put("/api/settings/TRADING_MODE?value=paper")
+        assert response.status_code == 401
+        app.dependency_overrides[require_auth] = lambda: None
 
 
 # ---------------------------------------------------------------------------
@@ -213,7 +243,6 @@ class TestRecentLogs:
             assert field in data[0]
 
     def test_limit_capped_at_500(self):
-        # limit=9999 must not raise — silently capped to 500.
         with _patch_log_db([]):
             response = client.get("/api/logs?limit=9999")
         assert response.status_code == 200
@@ -222,6 +251,12 @@ class TestRecentLogs:
         with _patch_log_db([]):
             data = client.get("/api/logs").json()
         assert data == []
+
+    def test_requires_auth_when_no_override(self):
+        app.dependency_overrides.clear()
+        response = client.get("/api/logs")
+        assert response.status_code == 401
+        app.dependency_overrides[require_auth] = lambda: None
 
 
 # ---------------------------------------------------------------------------

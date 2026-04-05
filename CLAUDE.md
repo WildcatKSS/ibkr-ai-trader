@@ -100,6 +100,7 @@ logs/            Rotating log files per category
 | `ALPACA_API_SECRET` | You      | Alpaca News API secret                                                  |
 | `FINNHUB_API_KEY`   | You      | Finnhub API key (fallback news provider)                                |
 | `SMTP_PASSWORD`     | You      | SMTP password or app password for email alerts                          |
+| `WEB_PASSWORD`      | You      | Admin password for the web dashboard login (JWT-authenticated)          |
 | `DB_PASSWORD`       | setup.sh | Generated automatically                                                 |
 | `SECRET_KEY`        | setup.sh | Session signing key; generated automatically                            |
 | `DOMAIN`            | setup.sh | Domain name entered during setup for Certbot                            |

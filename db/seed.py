@@ -26,6 +26,9 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 from db.models import Setting  # noqa: E402
 from db.session import get_session  # noqa: E402
+from bot.utils.logger import get_logger  # noqa: E402
+
+log = get_logger("ibkr")
 
 # ---------------------------------------------------------------------------
 # Default settings
@@ -199,7 +202,7 @@ def seed() -> None:
             )
             inserted += 1
 
-    print(f"Seed complete: {inserted} settings inserted, {skipped} already present.")
+    log.info("Seed complete", inserted=inserted, skipped=skipped)
 
 
 if __name__ == "__main__":

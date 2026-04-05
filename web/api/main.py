@@ -4,25 +4,47 @@ FastAPI application entry point for ibkr-ai-trader web interface.
 Run via systemd:
     uvicorn web.api.main:app --host 127.0.0.1 --port 8000 --workers 2
 
-Routes are grouped by concern and registered from sub-modules:
-    /health         — liveness probe (no auth required)
-    /api/status     — bot runtime status
-    /api/settings   — operational settings (CRUD backed by MariaDB)
-    /api/logs       — structured log entries
+Routes:
+    POST /api/auth/login    — obtain a JWT token (no auth required)
+    GET  /health            — liveness probe   (no auth required)
+    GET  /api/status        — bot runtime status
+    GET  /api/settings      — list all settings
+    PUT  /api/settings/{key}— update a setting
+    GET  /api/logs          — recent log entries
 """
 
 from __future__ import annotations
 
+import os
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from contextlib import asynccontextmanager
-
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from bot.utils.logger import get_logger, shutdown as logger_shutdown
+from web.api.auth import require_auth, router as auth_router
 
 log = get_logger("web")
+
+
+# ---------------------------------------------------------------------------
+# CORS helpers
+# ---------------------------------------------------------------------------
+
+
+def _cors_origins() -> list[str]:
+    """
+    Build the allowed-origin list from the environment.
+
+    Always permits localhost for local development.  If DOMAIN is set,
+    the production HTTPS origin is added automatically.
+    """
+    origins = ["http://localhost", "http://127.0.0.1"]
+    domain = os.getenv("DOMAIN", "").strip()
+    if domain:
+        origins.append(f"https://{domain}")
+    return origins
 
 
 # ---------------------------------------------------------------------------
@@ -54,24 +76,22 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost", "http://127.0.0.1"],
+    allow_origins=_cors_origins(),
     allow_methods=["GET", "POST", "PUT", "DELETE"],
-    allow_headers=["*"],
+    allow_headers=["Authorization", "Content-Type"],
 )
+
+app.include_router(auth_router)
 
 
 # ---------------------------------------------------------------------------
-# Health
+# Health  (public — required by Nginx upstream health checks)
 # ---------------------------------------------------------------------------
 
 
 @app.get("/health", tags=["health"], summary="Liveness probe")
 async def health() -> dict:
-    """
-    Returns HTTP 200 as long as the process is running.
-
-    Used by Nginx upstream health checks and systemd watchdog.
-    """
+    """Returns HTTP 200 as long as the process is running."""
     return {
         "status": "ok",
         "timestamp": datetime.now(tz=timezone.utc).isoformat(),
@@ -79,17 +99,14 @@ async def health() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Status
+# Status  (protected)
 # ---------------------------------------------------------------------------
 
 
-@app.get("/api/status", tags=["status"], summary="Bot runtime status")
+@app.get("/api/status", tags=["status"], summary="Bot runtime status",
+         dependencies=[Depends(require_auth)])
 async def status() -> dict:
-    """
-    Returns the current trading mode and calendar status.
-
-    Does not require the bot process to be running — reads config only.
-    """
+    """Returns the current trading mode and calendar status."""
     from bot.utils.calendar import is_market_open, is_trading_day
     from bot.utils.config import ConfigError, get
 
@@ -107,11 +124,12 @@ async def status() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Settings
+# Settings  (protected)
 # ---------------------------------------------------------------------------
 
 
-@app.get("/api/settings", tags=["settings"], summary="List all settings")
+@app.get("/api/settings", tags=["settings"], summary="List all settings",
+         dependencies=[Depends(require_auth)])
 async def list_settings() -> dict:
     """Return all operational settings as a flat key→value dict."""
     from bot.utils.config import all_settings
@@ -123,18 +141,19 @@ async def list_settings() -> dict:
     "/api/settings/{key}",
     tags=["settings"],
     summary="Update a setting",
+    dependencies=[Depends(require_auth)],
 )
 async def update_setting(key: str, value: str) -> dict:
     """
     Persist a new value for *key* in MariaDB and invalidate the config cache.
 
     The value is always stored as a string; type coercion happens at read time
-    via `bot.utils.config.get(..., cast=...)`.
+    via ``bot.utils.config.get(..., cast=...)``.
     """
-    from bot.utils.config import reload
-
-    from db.session import get_session
     from db.models import Setting
+    from db.session import get_session
+
+    from bot.utils.config import reload
 
     now = datetime.now(tz=timezone.utc)
 
@@ -153,11 +172,12 @@ async def update_setting(key: str, value: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Logs
+# Logs  (protected)
 # ---------------------------------------------------------------------------
 
 
-@app.get("/api/logs", tags=["logs"], summary="Recent log entries")
+@app.get("/api/logs", tags=["logs"], summary="Recent log entries",
+         dependencies=[Depends(require_auth)])
 async def recent_logs(
     category: str | None = None,
     level: str | None = None,
@@ -170,9 +190,10 @@ async def recent_logs(
     - **category** — e.g. ``trading``, ``signals``, ``ibkr``
     - **level**    — e.g. ``INFO``, ``WARNING``, ``ERROR``
     """
+    from sqlalchemy import desc, select
+
     from db.models import LogEntry
     from db.session import get_session
-    from sqlalchemy import select, desc
 
     limit = min(limit, 500)  # cap to prevent large result sets
 
