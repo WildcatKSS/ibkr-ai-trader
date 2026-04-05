@@ -57,7 +57,16 @@ class ConfigError(Exception):
 # Seconds before the cache is considered stale and reloaded from the DB.
 # Configurable via the CONFIG_CACHE_TTL environment variable (deployment
 # concern, not a business setting).
-_TTL: int = int(os.getenv("CONFIG_CACHE_TTL", "60"))
+def _parse_ttl() -> int:
+    raw = os.getenv("CONFIG_CACHE_TTL", "60")
+    try:
+        return int(raw)
+    except (ValueError, TypeError):
+        log.warning("Invalid CONFIG_CACHE_TTL value, using default of 60s", value=raw)
+        return 60
+
+
+_TTL: int = _parse_ttl()
 
 _cache: dict[str, str] = {}
 _loaded_at: float = 0.0  # epoch seconds of last successful DB load
