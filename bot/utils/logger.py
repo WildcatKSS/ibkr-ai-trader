@@ -142,13 +142,18 @@ class _AsyncDbHandler(logging.Handler):
 
 
 def _fallback_error(message: str) -> None:
+    import sys  # noqa: PLC0415 — local import to avoid top-level sys dependency
+
+    ts = datetime.now(tz=timezone.utc).isoformat(timespec="milliseconds")
+    line = f"{ts} | ERROR | logger | {message}\n"
     errors_log = LOG_DIR / "errors.log"
     try:
         with errors_log.open("a") as fh:
-            ts = datetime.now(tz=timezone.utc).isoformat(timespec="milliseconds")
-            fh.write(f"{ts} | ERROR | logger | {message}\n")
+            fh.write(line)
     except OSError:
-        pass  # Nothing left to do.
+        # errors.log is not writable (disk full, permissions) — write to stderr
+        # as the last-resort channel so the message is not silently lost.
+        print(line, end="", file=sys.stderr, flush=True)
 
 
 # ---------------------------------------------------------------------------
@@ -196,10 +201,9 @@ _db_handler_lock = threading.Lock()  # guards _async_db_handler
 
 def _get_async_db_handler() -> _AsyncDbHandler:
     global _async_db_handler  # noqa: PLW0603
-    if _async_db_handler is None:
-        with _db_handler_lock:
-            if _async_db_handler is None:
-                _async_db_handler = _AsyncDbHandler()
+    with _db_handler_lock:
+        if _async_db_handler is None:
+            _async_db_handler = _AsyncDbHandler()
     return _async_db_handler
 
 

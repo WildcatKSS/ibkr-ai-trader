@@ -19,7 +19,7 @@ import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException, Path, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from bot.utils.logger import get_logger, shutdown as logger_shutdown
@@ -137,19 +137,34 @@ async def list_settings() -> dict:
     return all_settings()
 
 
+_VALID_TRADING_MODES = frozenset({"paper", "live", "dryrun"})
+
+
 @app.put(
     "/api/settings/{key}",
     tags=["settings"],
     summary="Update a setting",
     dependencies=[Depends(require_auth)],
 )
-async def update_setting(key: str, value: str) -> dict:
+async def update_setting(
+    key: str = Path(..., pattern=r"^[A-Z][A-Z0-9_]{0,99}$", max_length=100),
+    value: str = Query(..., max_length=10_000),
+) -> dict:
     """
     Persist a new value for *key* in MariaDB and invalidate the config cache.
 
-    The value is always stored as a string; type coercion happens at read time
+    Key must match ``^[A-Z][A-Z0-9_]{0,99}$`` (uppercase, digits, underscores).
+    Value is capped at 10 000 characters.  TRADING_MODE is validated against
+    the allowed set (``paper``, ``live``, ``dryrun``).
+
+    The value is stored as a string; type coercion happens at read time
     via ``bot.utils.config.get(..., cast=...)``.
     """
+    if key == "TRADING_MODE" and value not in _VALID_TRADING_MODES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"TRADING_MODE must be one of: {', '.join(sorted(_VALID_TRADING_MODES))}",
+        )
     from db.models import Setting
     from db.session import get_session
 
@@ -195,7 +210,7 @@ async def recent_logs(
     from db.models import LogEntry
     from db.session import get_session
 
-    limit = min(limit, 500)  # cap to prevent large result sets
+    limit = max(1, min(limit, 500))  # enforce 1 ≤ limit ≤ 500
 
     with get_session() as session:
         q = select(LogEntry).order_by(desc(LogEntry.timestamp)).limit(limit)

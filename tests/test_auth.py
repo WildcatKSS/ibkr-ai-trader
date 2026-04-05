@@ -108,6 +108,45 @@ class TestLogin:
         response = client.post("/api/auth/login", json={"password": _TEST_PASSWORD})
         assert response.status_code == 500
 
+    def test_rate_limit_blocks_after_max_failures(self, monkeypatch):
+        """After _MAX_ATTEMPTS wrong passwords the endpoint returns 429."""
+        import web.api.auth as auth_module
+
+        # Reset rate-limit state so this test is independent of ordering.
+        with auth_module._rl_lock:
+            auth_module._failed_attempts.clear()
+
+        app.dependency_overrides.clear()
+        c = TestClient(app, raise_server_exceptions=False)
+
+        for _ in range(auth_module._MAX_ATTEMPTS):
+            c.post("/api/auth/login", json={"password": "wrong"})
+
+        response = c.post("/api/auth/login", json={"password": "wrong"})
+        assert response.status_code == 429
+
+        # Restore for subsequent tests.
+        with auth_module._rl_lock:
+            auth_module._failed_attempts.clear()
+        app.dependency_overrides[require_auth] = lambda: None
+
+    def test_correct_password_not_rate_limited(self, client, monkeypatch):
+        """A correct password after failed attempts still succeeds."""
+        import web.api.auth as auth_module
+
+        with auth_module._rl_lock:
+            auth_module._failed_attempts.clear()
+
+        # Fail up to but not including the limit.
+        for _ in range(auth_module._MAX_ATTEMPTS - 1):
+            client.post("/api/auth/login", json={"password": "wrong"})
+
+        response = client.post("/api/auth/login", json={"password": _TEST_PASSWORD})
+        assert response.status_code == 200
+
+        with auth_module._rl_lock:
+            auth_module._failed_attempts.clear()
+
 
 # ---------------------------------------------------------------------------
 # require_auth dependency — via a protected route

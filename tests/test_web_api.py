@@ -191,6 +191,30 @@ class TestUpdateSetting:
             client.put("/api/settings/TRADING_MODE?value=live")
         assert existing.value == "live"
 
+    def test_invalid_trading_mode_value_returns_422(self):
+        cm, _ = _make_session_cm()
+        with (
+            patch("db.session.get_session", return_value=cm),
+            patch("bot.utils.config.reload"),
+        ):
+            response = client.put("/api/settings/TRADING_MODE?value=INVALID")
+        assert response.status_code == 422
+
+    def test_key_with_lowercase_returns_422(self):
+        response = client.put("/api/settings/bad_key?value=x")
+        assert response.status_code == 422
+
+    def test_value_max_length_enforced(self):
+        long_value = "x" * 10_001
+        response = client.put(f"/api/settings/SOME_KEY?value={long_value}")
+        assert response.status_code == 422
+
+    def test_negative_limit_clamped_to_one(self):
+        """limit=-1 must not pass a negative value to SQLAlchemy."""
+        with _patch_log_db([]):
+            response = client.get("/api/logs?limit=-1")
+        assert response.status_code == 200
+
     def test_requires_auth_when_no_override(self):
         app.dependency_overrides.clear()
         response = client.put("/api/settings/TRADING_MODE?value=paper")

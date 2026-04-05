@@ -39,7 +39,7 @@ _db_url = URL.create(
     database=os.getenv("DB_NAME", "ibkr_trader"),
     query={"charset": "utf8mb4"},
 )
-config.set_main_option("sqlalchemy.url", _db_url.render_as_string(hide_password=False))
+config.set_main_option("sqlalchemy.url", _db_url.render_as_string(hide_password=True))
 
 # Import all models so Alembic can detect schema changes for autogenerate.
 from db.models import Base  # noqa: E402

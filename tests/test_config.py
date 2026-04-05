@@ -197,3 +197,42 @@ class TestAllSettings:
             result = all_settings()
             result["TRADING_MODE"] = "live"
             assert cfg._cache["TRADING_MODE"] == "dryrun"
+
+
+# ---------------------------------------------------------------------------
+# Thread safety
+# ---------------------------------------------------------------------------
+
+
+class TestThreadSafety:
+    def test_concurrent_get_does_not_raise(self):
+        """
+        100 threads calling get() simultaneously must all return the correct
+        value without a lock error, data race, or exception.
+        """
+        import concurrent.futures
+
+        with _patch_db():
+            with concurrent.futures.ThreadPoolExecutor(max_workers=20) as pool:
+                futures = [pool.submit(get, "TRADING_MODE") for _ in range(100)]
+                results = [f.result() for f in futures]
+
+        assert all(r == "dryrun" for r in results)
+
+    def test_concurrent_reload_does_not_corrupt_cache(self):
+        """
+        Interleaved reload() and get() calls must not produce a corrupted
+        cache (e.g. empty dict or KeyError).
+        """
+        import concurrent.futures
+
+        with _patch_db():
+            def _reload_then_get():
+                reload()
+                return get("EOD_CLOSE_MINUTES")
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as pool:
+                futures = [pool.submit(_reload_then_get) for _ in range(50)]
+                results = [f.result() for f in futures]
+
+        assert all(r == "15" for r in results)

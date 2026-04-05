@@ -77,11 +77,13 @@ def _load_from_db() -> dict[str, str]:
     """Fetch all rows from the settings table and return as {key: value}."""
     # Late import to mirror logger.py's pattern: avoid circular imports at
     # module load time and tolerate the DB not being set up during early boot.
+    from sqlalchemy import select  # noqa: PLC0415
+
     from db.models import Setting  # noqa: PLC0415
     from db.session import get_session  # noqa: PLC0415
 
     with get_session() as session:
-        rows = session.query(Setting.key, Setting.value).all()
+        rows = session.execute(select(Setting.key, Setting.value)).all()
     return {key: value for key, value in rows}
 
 

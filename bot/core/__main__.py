@@ -36,6 +36,7 @@ def main() -> None:
         trading_mode = get("TRADING_MODE")
     except ConfigError as exc:
         log.error("Cannot read TRADING_MODE from database — aborting", error=str(exc))
+        logger_shutdown()
         sys.exit(1)
 
     if trading_mode not in ("paper", "live", "dryrun"):
@@ -43,6 +44,7 @@ def main() -> None:
             "Invalid TRADING_MODE — must be paper, live, or dryrun",
             trading_mode=trading_mode,
         )
+        logger_shutdown()
         sys.exit(1)
 
     log.info("Bot starting", trading_mode=trading_mode)

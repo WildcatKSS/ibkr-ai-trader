@@ -17,12 +17,15 @@ Dependency:
 
 from __future__ import annotations
 
+import collections
 import hmac
 import os
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
@@ -35,6 +38,35 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 _ALGORITHM = "HS256"
 _TOKEN_EXPIRE_HOURS = 24
 _bearer = HTTPBearer()
+
+# ---------------------------------------------------------------------------
+# Rate limiting — sliding window, per source IP
+# ---------------------------------------------------------------------------
+
+_MAX_ATTEMPTS = 5       # failed attempts allowed per window
+_WINDOW_SECS = 60       # seconds in the sliding window
+_rl_lock = threading.Lock()
+_failed_attempts: dict[str, collections.deque] = collections.defaultdict(collections.deque)
+
+
+def _check_rate_limit(ip: str) -> None:
+    """Raise HTTP 429 if *ip* has exceeded the failed-login threshold."""
+    now = time.monotonic()
+    with _rl_lock:
+        dq = _failed_attempts[ip]
+        while dq and now - dq[0] > _WINDOW_SECS:
+            dq.popleft()
+        if len(dq) >= _MAX_ATTEMPTS:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many failed login attempts. Try again in a minute.",
+            )
+
+
+def _record_failure(ip: str) -> None:
+    """Record a failed login attempt for *ip*."""
+    with _rl_lock:
+        _failed_attempts[ip].append(time.monotonic())
 
 
 # ---------------------------------------------------------------------------
@@ -110,21 +142,26 @@ class LoginRequest(BaseModel):
 
 
 @router.post("/login", summary="Obtain a JWT access token")
-async def login(body: LoginRequest) -> dict:
+async def login(body: LoginRequest, request: Request) -> dict:
     """
     Exchange the admin password for a signed JWT.
 
-    The password is compared in constant time to prevent timing attacks.
-    Tokens expire after 24 hours; re-authenticate to obtain a new one.
+    Brute-force protected: 5 failed attempts per IP within 60 seconds triggers
+    HTTP 429.  The password is compared in constant time to prevent timing
+    attacks.  Tokens expire after 24 hours; re-authenticate to obtain a new one.
     """
+    client_ip = request.client.host if request.client else "unknown"
+    _check_rate_limit(client_ip)
+
     expected = _web_password()
     if not hmac.compare_digest(body.password.encode(), expected.encode()):
-        log.warning("Failed login attempt")
+        _record_failure(client_ip)
+        log.warning("Failed login attempt", ip=client_ip)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect password",
             headers={"WWW-Authenticate": "Bearer"},
         )
     token = _create_token()
-    log.info("Login successful")
+    log.info("Login successful", ip=client_ip)
     return {"access_token": token, "token_type": "bearer"}

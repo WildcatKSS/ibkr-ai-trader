@@ -59,6 +59,13 @@ def _get_session_factory() -> sessionmaker:
                     # Keep a small pool; the async DB handler uses a single thread.
                     pool_size=5,
                     max_overflow=10,
+                    # Per-connection timeouts to prevent a slow or hung MariaDB
+                    # from blocking the trading loop indefinitely.
+                    connect_args={
+                        "connect_timeout": 10,   # seconds to establish the TCP connection
+                        "read_timeout": 30,       # seconds to wait for a server response
+                        "write_timeout": 30,      # seconds to wait for a write to complete
+                    },
                 )
                 _SessionLocal = sessionmaker(bind=_engine, autoflush=False)
     return _SessionLocal
