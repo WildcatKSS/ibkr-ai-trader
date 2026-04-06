@@ -99,7 +99,11 @@ class TradingEngine:
         # Re-read EOD threshold each tick so web UI changes take effect quickly.
         try:
             eod_minutes = int(get("EOD_CLOSE_MINUTES"))
-        except (ValueError, TypeError):
+        except (ValueError, TypeError) as exc:
+            log.warning(
+                "EOD_CLOSE_MINUTES unreadable — falling back to 15 min",
+                error=str(exc),
+            )
             eod_minutes = 15
 
         if not is_market_open():

@@ -95,11 +95,14 @@ def _web_password() -> str:
 
 def _create_token() -> str:
     exp = datetime.now(tz=timezone.utc) + timedelta(hours=_TOKEN_EXPIRE_HOURS)
-    return jwt.encode({"exp": exp}, _secret_key(), algorithm=_ALGORITHM)
+    return jwt.encode({"sub": "admin", "exp": exp}, _secret_key(), algorithm=_ALGORITHM)
 
 
 def _decode_token(token: str) -> dict:
-    return jwt.decode(token, _secret_key(), algorithms=[_ALGORITHM])
+    payload = jwt.decode(token, _secret_key(), algorithms=[_ALGORITHM])
+    if payload.get("sub") != "admin":
+        raise jwt.InvalidTokenError("Invalid token subject")
+    return payload
 
 
 # ---------------------------------------------------------------------------

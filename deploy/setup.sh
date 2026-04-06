@@ -70,15 +70,20 @@ ENV_FILE="${APP_DIR}/.env"
 if [[ -f "$ENV_FILE" ]]; then
     # Strip surrounding double quotes produced by the quoted .env format:
     #   DB_PASSWORD="abc123"  →  cut gives  "abc123"  →  sed strips to  abc123
-    DB_PASSWORD=$(grep '^DB_PASSWORD=' "$ENV_FILE" | cut -d= -f2- | sed 's/^"//;s/"$//' || true)
-    SECRET_KEY=$(grep  '^SECRET_KEY='  "$ENV_FILE" | cut -d= -f2- | sed 's/^"//;s/"$//' || true)
-    [[ -n "$DB_PASSWORD" ]] || error ".env exists but DB_PASSWORD is empty. Fix ${ENV_FILE} before re-running."
-    [[ -n "$SECRET_KEY"  ]] || error ".env exists but SECRET_KEY is empty. Fix ${ENV_FILE} before re-running."
+    DB_PASSWORD=$(grep '^DB_PASSWORD='  "$ENV_FILE" | cut -d= -f2- | sed 's/^"//;s/"$//' || true)
+    SECRET_KEY=$(grep  '^SECRET_KEY='   "$ENV_FILE" | cut -d= -f2- | sed 's/^"//;s/"$//' || true)
+    WEB_PASSWORD=$(grep '^WEB_PASSWORD=' "$ENV_FILE" | cut -d= -f2- | sed 's/^"//;s/"$//' || true)
+    [[ -n "$DB_PASSWORD"  ]] || error ".env exists but DB_PASSWORD is empty. Fix ${ENV_FILE} before re-running."
+    [[ -n "$SECRET_KEY"   ]] || error ".env exists but SECRET_KEY is empty. Fix ${ENV_FILE} before re-running."
+    # WEB_PASSWORD may be absent in .env files created before this version —
+    # generate one now so the web service starts correctly.
+    [[ -n "$WEB_PASSWORD" ]] || WEB_PASSWORD=$(openssl rand -base64 18 | tr -dc 'A-Za-z0-9' | head -c 24)
     FIRST_RUN=false
     info "Existing .env found — reusing DB credentials."
 else
-    DB_PASSWORD=$(openssl rand -hex 16)   # 32 hex chars, 128-bit entropy, no SIGPIPE risk
-    SECRET_KEY=$(openssl rand  -hex 24)   # 48 hex chars, 192-bit entropy
+    DB_PASSWORD=$(openssl rand -hex 16)              # 32 hex chars, 128-bit entropy
+    SECRET_KEY=$(openssl rand  -hex 24)              # 48 hex chars, 192-bit entropy
+    WEB_PASSWORD=$(openssl rand -base64 18 | tr -dc 'A-Za-z0-9' | head -c 24)  # 24-char alphanumeric
     FIRST_RUN=true
 fi
 
@@ -421,6 +426,7 @@ DB_NAME="${DB_NAME}"
 DB_USER="${DB_USER}"
 DB_PASSWORD="${DB_PASSWORD}"
 SECRET_KEY="${SECRET_KEY}"
+WEB_PASSWORD="${WEB_PASSWORD}"
 DOMAIN="${DOMAIN}"
 ENVFILE
     chmod 600 "$ENV_FILE"
@@ -589,8 +595,10 @@ printf "║  DB name      : %-45s║\n" "${DB_NAME}"
 printf "║  DB user      : %-45s║\n" "${DB_USER}"
 if [[ "$FIRST_RUN" == true ]]; then
     printf "║  DB password  : %-45s║\n" "${DB_PASSWORD}"
+    printf "║  Web password : %-45s║\n" "${WEB_PASSWORD}"
 else
     printf "║  DB password  : %-45s║\n" "(unchanged — see ${ENV_FILE})"
+    printf "║  Web password : %-45s║\n" "(unchanged — see ${ENV_FILE})"
 fi
 echo "╠══════════════════════════════════════════════════════════════╣"
 echo "║  Next steps:                                                 ║"
@@ -613,5 +621,5 @@ fi
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo ""
 if [[ "$FIRST_RUN" == true ]]; then
-    warn "Save the DB password above — it is stored in ${ENV_FILE} but shown here only once."
+    warn "Save the DB and web passwords above — stored in ${ENV_FILE} but shown here only once."
 fi

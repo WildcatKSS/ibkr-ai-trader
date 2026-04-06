@@ -62,6 +62,7 @@ class TestTokenHelpers:
         token = _create_token()
         payload = _decode_token(token)
         assert "exp" in payload
+        assert payload.get("sub") == "admin"
 
     def test_expired_token_raises(self):
         exp = datetime.now(tz=timezone.utc) - timedelta(seconds=1)

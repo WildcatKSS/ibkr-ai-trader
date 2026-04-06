@@ -149,6 +149,7 @@ _VALID_TRADING_MODES = frozenset({"paper", "live", "dryrun"})
 async def update_setting(
     key: str = Path(..., pattern=r"^[A-Z][A-Z0-9_]{0,99}$", max_length=100),
     value: str = Query(..., max_length=10_000),
+    description: str | None = Query(default=None, max_length=500),
 ) -> dict:
     """
     Persist a new value for *key* in MariaDB and invalidate the config cache.
@@ -156,6 +157,9 @@ async def update_setting(
     Key must match ``^[A-Z][A-Z0-9_]{0,99}$`` (uppercase, digits, underscores).
     Value is capped at 10 000 characters.  TRADING_MODE is validated against
     the allowed set (``paper``, ``live``, ``dryrun``).
+
+    For existing keys the stored description is preserved unless *description*
+    is explicitly supplied.  For new keys, *description* is optional.
 
     The value is stored as a string; type coercion happens at read time
     via ``bot.utils.config.get(..., cast=...)``.
@@ -175,11 +179,13 @@ async def update_setting(
     with get_session() as session:
         obj = session.get(Setting, key)
         if obj is None:
-            obj = Setting(key=key, value=value, updated_at=now)
+            obj = Setting(key=key, value=value, description=description, updated_at=now)
             session.add(obj)
         else:
             obj.value = value
             obj.updated_at = now
+            if description is not None:   # only overwrite when caller supplied one
+                obj.description = description
 
     reload()
     log.info("Setting updated", key=key)
@@ -189,6 +195,9 @@ async def update_setting(
 # ---------------------------------------------------------------------------
 # Logs  (protected)
 # ---------------------------------------------------------------------------
+
+
+_VALID_LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
 
 
 @app.get("/api/logs", tags=["logs"], summary="Recent log entries",
@@ -202,13 +211,26 @@ async def recent_logs(
     Return the most recent *limit* log entries from MariaDB.
 
     Optional filters:
-    - **category** — e.g. ``trading``, ``signals``, ``ibkr``
-    - **level**    — e.g. ``INFO``, ``WARNING``, ``ERROR``
+    - **category** — one of the categories defined in ``bot/utils/logger.py``
+      (e.g. ``trading``, ``signals``, ``ibkr``)
+    - **level**    — ``DEBUG``, ``INFO``, ``WARNING``, ``ERROR``, or ``CRITICAL``
     """
+    from bot.utils.logger import VALID_CATEGORIES
     from sqlalchemy import desc, select
 
     from db.models import LogEntry
     from db.session import get_session
+
+    if category is not None and category not in VALID_CATEGORIES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid category. Valid values: {', '.join(sorted(VALID_CATEGORIES))}",
+        )
+    if level is not None and level.upper() not in _VALID_LOG_LEVELS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid level. Valid values: {', '.join(sorted(_VALID_LOG_LEVELS))}",
+        )
 
     limit = max(1, min(limit, 500))  # enforce 1 ≤ limit ≤ 500
 

@@ -276,6 +276,29 @@ class TestRecentLogs:
             data = client.get("/api/logs").json()
         assert data == []
 
+    def test_valid_category_filter_accepted(self):
+        with _patch_log_db([]):
+            response = client.get("/api/logs?category=trading")
+        assert response.status_code == 200
+
+    def test_invalid_category_returns_422(self):
+        response = client.get("/api/logs?category=nonexistent")
+        assert response.status_code == 422
+
+    def test_valid_level_filter_accepted(self):
+        with _patch_log_db([]):
+            response = client.get("/api/logs?level=ERROR")
+        assert response.status_code == 200
+
+    def test_invalid_level_returns_422(self):
+        response = client.get("/api/logs?level=VERBOSE")
+        assert response.status_code == 422
+
+    def test_level_case_insensitive_accepted(self):
+        with _patch_log_db([]):
+            response = client.get("/api/logs?level=info")
+        assert response.status_code == 200
+
     def test_requires_auth_when_no_override(self):
         app.dependency_overrides.clear()
         response = client.get("/api/logs")
