@@ -28,6 +28,23 @@ _engine = None
 _SessionLocal: sessionmaker | None = None
 
 
+def _parse_port() -> int:
+    raw = os.getenv("DB_PORT", "3306")
+    try:
+        return int(raw)
+    except ValueError:
+        # Defer importing the logger to avoid a circular-import at module load
+        # time (logger → db/session → logger).  Writing to stderr is safe here
+        # because this is a startup-path failure.
+        import sys
+        print(
+            f"WARNING: DB_PORT={raw!r} is not a valid integer — using 3306",
+            file=sys.stderr,
+            flush=True,
+        )
+        return 3306
+
+
 def _build_url() -> URL:
     # Use URL.create() so SQLAlchemy handles percent-encoding of special
     # characters in the password (e.g. @, :, /, %).  A raw f-string would
@@ -37,7 +54,7 @@ def _build_url() -> URL:
         username=os.getenv("DB_USER", "ibkr_trader"),
         password=os.getenv("DB_PASSWORD", ""),
         host=os.getenv("DB_HOST", "localhost"),
-        port=int(os.getenv("DB_PORT", "3306")),
+        port=_parse_port(),
         database=os.getenv("DB_NAME", "ibkr_trader"),
         query={"charset": "utf8mb4"},
     )
