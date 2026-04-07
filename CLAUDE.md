@@ -111,14 +111,64 @@ All other operational settings (risk parameters, position sizing, universe selec
 
 -----
 
+## Daily Universe Scan — exact order
+
+Runs **once per trading day** (first engine tick of the day, before or at market open).
+
+1. `bot/universe/scanner.py` — fetch daily OHLCV bars for each symbol in `UNIVERSE_POOL`
+2. `bot/universe/criteria.py` — score each symbol (0–100) against bullish criteria
+3. `bot/universe/selector.py` — Claude API call to make final selection
+
+Result:
+- **autonomous mode** (`UNIVERSE_APPROVAL_MODE=autonomous`): top-1 symbol is traded automatically.
+- **approval mode** (`UNIVERSE_APPROVAL_MODE=approval`): ranked watchlist stored; user picks via web dashboard before trading starts.
+
+### Universe criteria (daily timeframe)
+
+**Moving averages**
+- 9 EMA — short-term momentum (`UNIVERSE_EMA9_PERIOD`)
+- 50 SMA — trend confirmation (`UNIVERSE_SMA50_PERIOD`)
+- 200 SMA — macro trend filter (`UNIVERSE_SMA200_PERIOD`)
+
+**Core bullish criteria — ALL must pass (scores 75 pts total)**
+
+| Criterion | Setting | Points |
+|---|---|---|
+| Price > 9 EMA | — | 10 |
+| Price > 50 SMA | — | 10 |
+| Price > 200 SMA | — | 10 |
+| 9 EMA rising | — | 10 |
+| 50 SMA rising | — | 10 |
+| Higher highs + higher lows | `UNIVERSE_HH_HL_LOOKBACK` | 15 |
+| Volume above average & rising on green candles | `UNIVERSE_VOLUME_MA_PERIOD` | 10 |
+
+**Bonus criteria — improve ranking (35 pts total)**
+
+| Criterion | Setting | Points |
+|---|---|---|
+| Strong bullish candles (large bodies) | `UNIVERSE_BODY_RATIO_MIN` | 5 |
+| Small upper wicks (little rejection) | `UNIVERSE_WICK_RATIO_MAX` | 5 |
+| Pullbacks hold above 9 EMA | — | 5 |
+| Near resistance (breakout imminent) | `UNIVERSE_NEAR_RESISTANCE_PCT` | 10 |
+| Momentum / gap-up | `UNIVERSE_MOMENTUM_GAP_PCT`, `UNIVERSE_MOMENTUM_5D_RETURN_PCT` | 10 |
+
+A symbol needs score > 0 to appear in the watchlist; `passes_all=True` requires all 7 core criteria.
+The watchlist size is configured via `UNIVERSE_MAX_SYMBOLS` (default 10).
+
+Never skip or reorder the universe scan steps.
+
+-----
+
 ## Signal Pipeline — exact order
 
+Runs intraday **for each symbol in the watchlist** during market hours.
+
 1. `bot/signals/indicators.py` — calculate ta indicators on 5-min candles
-1. `bot/ml/model.py` — LightGBM prediction (long / short / no trade)
-1. `bot/signals/generator.py` — 15-min confirmation filter (both timeframes must agree)
-1. Claude API call — context, sentiment, final decision, entry/target/stop, explanation
-1. `bot/risk/manager.py` — risk check and position sizing
-1. `bot/orders/executor.py` — place order via IBKR API
+2. `bot/ml/model.py` — LightGBM prediction (long / short / no trade)
+3. `bot/signals/generator.py` — 15-min confirmation filter (both timeframes must agree)
+4. Claude API call — context, sentiment, final decision, entry/target/stop, explanation
+5. `bot/risk/manager.py` — risk check and position sizing
+6. `bot/orders/executor.py` — place order via IBKR API
 
 Never skip or reorder these steps.
 
@@ -217,5 +267,8 @@ All ERROR and CRITICAL entries are also written to `logs/errors.log` automatical
 - Do not change `TRADING_MODE` logic without updating all three paths: paper, live, dryrun
 - Do not make Claude API calls from inside `bot/ml/` — that module is ML only
 - Do not add dependencies without adding them to `requirements.txt`
-- Technical indicators use the `ta` library (replaces the abandoned `pandas-ta`) — ensure it is in `requirements.txt` and imported only via `bot/signals/indicators.py`
+- Technical indicators use the `ta` library (replaces the abandoned `pandas-ta`) — ensure it is in `requirements.txt` and imported only via `bot/signals/indicators.py` (intraday) and `bot/universe/criteria.py` (daily)
 - The NYSE trading calendar uses the `exchange_calendars` library (the maintained fork of the abandoned `trading_calendars`) — ensure it is in `requirements.txt` and imported via `bot/utils/calendar.py` only
+- Do not add universe criteria logic outside `bot/universe/criteria.py` — all scoring weights and thresholds live there and are configurable via DB settings
+- Do not call Claude API inside `bot/universe/scanner.py` or `bot/universe/criteria.py` — the Claude call belongs exclusively in `bot/universe/selector.py`
+- The `DataProvider` protocol (`bot/universe/scanner.py`) must be injected — never instantiate an IBKR connection directly inside the universe package

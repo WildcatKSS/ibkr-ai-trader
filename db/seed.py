@@ -24,6 +24,8 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
+from sqlalchemy import select as sa_select
+
 from db.models import Setting  # noqa: E402
 from db.session import get_session  # noqa: E402
 from bot.utils.logger import get_logger  # noqa: E402
@@ -58,14 +60,17 @@ DEFAULTS: list[tuple[str, str, str]] = [
     # ── Universe selection ───────────────────────────────────────────────────
     (
         "UNIVERSE_MAX_SYMBOLS",
-        "20",
-        "Maximum number of symbols in the daily trading universe.",
+        "10",
+        "Watchlist size: number of symbols returned by the daily universe scan. "
+        "In autonomous mode only the top-1 is traded; in approval mode the user "
+        "picks from this list.",
     ),
     (
         "UNIVERSE_APPROVAL_MODE",
         "autonomous",
-        "Universe selection mode: 'autonomous' (Claude decides) or "
-        "'approval' (human confirms before trading starts).",
+        "Universe selection mode: 'autonomous' (bot trades the highest-scored "
+        "symbol automatically) or 'approval' (user picks from the watchlist via "
+        "the web dashboard before trading starts).",
     ),
     (
         "UNIVERSE_MIN_AVG_VOLUME",
@@ -81,6 +86,80 @@ DEFAULTS: list[tuple[str, str, str]] = [
         "UNIVERSE_MAX_PRICE",
         "500.0",
         "Maximum share price (USD) for universe inclusion.",
+    ),
+    (
+        "UNIVERSE_POOL",
+        "SPY,QQQ,IWM,DIA,XLF,XLK,XLE,XLV,GLD,"
+        "AAPL,MSFT,NVDA,GOOGL,AMZN,META,TSLA,AMD,AVGO,QCOM,INTC,CRM,ADBE,ORCL,NFLX,"
+        "JPM,BAC,GS,MS,V,MA,"
+        "JNJ,UNH,LLY,PFE,TMO,"
+        "HD,WMT,COST,NKE,SBUX,MCD,"
+        "CVX,XOM,COP,"
+        "CAT,BA,GE,HON",
+        "Comma-separated list of candidate symbols scanned daily by the universe "
+        "scanner. Edit via the web dashboard to customise the opportunity set.",
+    ),
+    (
+        "UNIVERSE_BARS_HISTORY",
+        "250",
+        "Number of daily bars fetched per symbol. Must be ≥ 210 (SMA-200 needs "
+        "200 bars plus a safety margin).",
+    ),
+    # ── Universe criteria — daily timeframe ──────────────────────────────────
+    (
+        "UNIVERSE_EMA9_PERIOD",
+        "9",
+        "Period for the short-term EMA (price momentum indicator).",
+    ),
+    (
+        "UNIVERSE_SMA50_PERIOD",
+        "50",
+        "Period for the medium-term SMA (trend confirmation).",
+    ),
+    (
+        "UNIVERSE_SMA200_PERIOD",
+        "200",
+        "Period for the long-term SMA (macro trend filter).",
+    ),
+    (
+        "UNIVERSE_VOLUME_MA_PERIOD",
+        "20",
+        "Period for the volume moving average used as the 'average volume' baseline.",
+    ),
+    (
+        "UNIVERSE_HH_HL_LOOKBACK",
+        "20",
+        "Number of daily bars used to detect higher-highs / higher-lows structure.",
+    ),
+    (
+        "UNIVERSE_BODY_RATIO_MIN",
+        "0.60",
+        "Minimum candle body-to-range ratio to classify a candle as 'strong bullish'. "
+        "Range 0–1; default 0.60 means body ≥ 60 % of the high-low range.",
+    ),
+    (
+        "UNIVERSE_WICK_RATIO_MAX",
+        "0.30",
+        "Maximum upper-wick-to-range ratio to classify a candle as having 'small "
+        "rejection'. Range 0–1; default 0.30 means upper wick ≤ 30 % of range.",
+    ),
+    (
+        "UNIVERSE_NEAR_RESISTANCE_PCT",
+        "2.0",
+        "A symbol is 'near resistance' when its last close is within this many "
+        "percent below the most recent swing-high (breakout candidate signal).",
+    ),
+    (
+        "UNIVERSE_MOMENTUM_GAP_PCT",
+        "0.5",
+        "Minimum gap-up percentage (today open vs. prior close) that counts as "
+        "a momentum / pre-market signal.",
+    ),
+    (
+        "UNIVERSE_MOMENTUM_5D_RETURN_PCT",
+        "5.0",
+        "Minimum 5-day price return (%) that counts as strong momentum, "
+        "in addition to the gap-up check.",
     ),
     # ── Position sizing ──────────────────────────────────────────────────────
     (
@@ -186,7 +265,7 @@ def seed() -> None:
 
     with get_session() as session:
         existing_keys: set[str] = {
-            key for (key,) in session.query(Setting.key).all()
+            key for (key,) in session.execute(sa_select(Setting.key)).all()
         }
         for key, value, description in DEFAULTS:
             if key in existing_keys:
