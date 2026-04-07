@@ -3,12 +3,12 @@
 # deploy/update.sh — Update IBKR AI Trader to the latest version
 #
 # Run as root on the server:
-#   sudo bash deploy/update.sh
+#   sudo bash /opt/ibkr-trader/deploy/update.sh
 #
 # What it does:
 #   1. Stops ibkr-bot and ibkr-web
-#   2. Pulls the latest code from git
-#   3. Syncs files to /opt/ibkr-trader (if running from a separate clone)
+#   2. Pulls latest code from GitHub (clones to temp dir if needed)
+#   3. Syncs files to /opt/ibkr-trader
 #   4. Installs new/updated Python dependencies
 #   5. Runs pending database migrations
 #   6. Reloads Nginx
@@ -19,6 +19,12 @@
 #
 # ⚠ Do not run this script during an active trading session. The bot is
 #   stopped for the duration of the update.
+#
+# Authentication
+# --------------
+# The script uses the SSH key of the root user by default.
+# Alternatively set GITHUB_TOKEN to use HTTPS:
+#   GITHUB_TOKEN=ghp_xxx sudo bash deploy/update.sh
 # =============================================================================
 
 set -euo pipefail
@@ -38,38 +44,24 @@ step()  { echo -e "\n${GREEN}══ $* ${NC}"; }
 [[ $EUID -eq 0 ]] || error "Run this script as root: sudo bash deploy/update.sh"
 
 # ---------------------------------------------------------------------------
-# Constants — must match setup.sh
+# Configuration
 # ---------------------------------------------------------------------------
 APP_DIR="/opt/ibkr-trader"
 APP_USER="trader"
 VENV="${APP_DIR}/venv"
+GITHUB_ORG="wildcatkss"
+GITHUB_REPO_NAME="ibkr-ai-trader"
+BRANCH="main"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(dirname "$SCRIPT_DIR")"
-
-# Allow an explicit override: GIT_REPO=/path/to/repo sudo bash deploy/update.sh
-# This is useful when the git clone lives outside APP_DIR.
-if [[ -n "${GIT_REPO:-}" ]]; then
-    REPO_ROOT="$GIT_REPO"
-fi
-
-# Verify that REPO_ROOT is actually a git repository.
-if ! git -C "$REPO_ROOT" rev-parse --git-dir &>/dev/null; then
-    echo ""
-    echo -e "${RED}[ERROR]${NC} ${REPO_ROOT} is not a git repository."
-    echo ""
-    echo "  The update script needs a git repository to pull from."
-    echo "  Choose one of the following:"
-    echo ""
-    echo "  Option A — Clone directly into the deployment directory (recommended):"
-    echo "    cd /opt"
-    echo "    git clone <your-repo-url> ibkr-trader"
-    echo "    # then run: sudo bash /opt/ibkr-trader/deploy/update.sh"
-    echo ""
-    echo "  Option B — Keep the repo elsewhere and pass the path:"
-    echo "    GIT_REPO=/home/trader/ibkr-ai-trader sudo bash deploy/update.sh"
-    echo ""
-    exit 1
+# Build the remote URL.
+# HTTPS with token: GITHUB_TOKEN=ghp_xxx sudo bash deploy/update.sh
+# SSH (default):    uses root's ~/.ssh key — no token needed for public repos
+if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    REMOTE_URL="https://${GITHUB_TOKEN}@github.com/${GITHUB_ORG}/${GITHUB_REPO_NAME}.git"
+    AUTH_METHOD="HTTPS (token)"
+else
+    REMOTE_URL="git@github.com:${GITHUB_ORG}/${GITHUB_REPO_NAME}.git"
+    AUTH_METHOD="SSH"
 fi
 
 # ---------------------------------------------------------------------------
@@ -87,18 +79,29 @@ echo ""
 [[ -d "$APP_DIR" ]] || error "${APP_DIR} not found. Run deploy/setup.sh first."
 [[ -d "$VENV"    ]] || error "Virtual environment not found at ${VENV}. Run deploy/setup.sh first."
 command -v git     &>/dev/null || error "git is not installed."
+command -v rsync   &>/dev/null || error "rsync is not installed (apt install rsync)."
+
+info "Remote: ${REMOTE_URL//${GITHUB_TOKEN:-TOKEN}/***}"
+info "Auth:   ${AUTH_METHOD}"
 
 # ---------------------------------------------------------------------------
 # Trap: restart services if the update fails so the server is never left idle
 # ---------------------------------------------------------------------------
 SERVICES_STOPPED=false
-_on_error() {
-    if [[ "$SERVICES_STOPPED" == true ]]; then
+WORK_DIR=""
+
+_on_exit() {
+    local exit_code=$?
+    # Remove temp clone directory if we created one
+    if [[ -n "$WORK_DIR" && -d "$WORK_DIR" && "$WORK_DIR" != "$APP_DIR" ]]; then
+        rm -rf "$WORK_DIR"
+    fi
+    if [[ "$SERVICES_STOPPED" == true && $exit_code -ne 0 ]]; then
         warn "Update failed — restarting services with the previous version..."
         systemctl start ibkr-bot ibkr-web 2>/dev/null || true
     fi
 }
-trap _on_error EXIT
+trap _on_exit EXIT
 
 # ---------------------------------------------------------------------------
 # Step 1 — Stop services
@@ -115,37 +118,53 @@ for SERVICE in ibkr-bot ibkr-web; do
 done
 
 # ---------------------------------------------------------------------------
-# Step 2 — Git pull
+# Step 2 — Fetch latest code from GitHub
 # ---------------------------------------------------------------------------
-step "2 — Pulling latest code"
-cd "$REPO_ROOT"
-COMMIT_BEFORE=$(git rev-parse HEAD)
-git pull origin main
-COMMIT_AFTER=$(git rev-parse HEAD)
-if [[ "$COMMIT_BEFORE" == "$COMMIT_AFTER" ]]; then
-    info "Already up to date ($(git rev-parse --short HEAD))."
+step "2 — Fetching latest code from GitHub"
+
+if git -C "$APP_DIR" rev-parse --git-dir &>/dev/null; then
+    # APP_DIR is already a git repo — update the remote URL and pull.
+    WORK_DIR="$APP_DIR"
+    git -C "$APP_DIR" remote set-url origin "$REMOTE_URL" 2>/dev/null || \
+        git -C "$APP_DIR" remote add origin "$REMOTE_URL"
+
+    COMMIT_BEFORE=$(git -C "$APP_DIR" rev-parse HEAD 2>/dev/null || echo "none")
+    git -C "$APP_DIR" fetch origin "$BRANCH"
+    git -C "$APP_DIR" reset --hard "origin/${BRANCH}"
+    COMMIT_AFTER=$(git -C "$APP_DIR" rev-parse HEAD)
+
+    if [[ "$COMMIT_BEFORE" == "$COMMIT_AFTER" ]]; then
+        info "Already up to date ($(git -C "$APP_DIR" rev-parse --short HEAD))."
+    else
+        info "Updated $(git -C "$APP_DIR" rev-parse --short "$COMMIT_BEFORE") → $(git -C "$APP_DIR" rev-parse --short "$COMMIT_AFTER")"
+        git -C "$APP_DIR" log --oneline "${COMMIT_BEFORE}..${COMMIT_AFTER}" | while read -r line; do
+            info "  ${line}"
+        done
+    fi
 else
-    info "Updated $(git rev-parse --short "$COMMIT_BEFORE") → $(git rev-parse --short "$COMMIT_AFTER")"
-    git log --oneline "${COMMIT_BEFORE}..${COMMIT_AFTER}" | while read -r line; do
-        info "  ${line}"
-    done
+    # APP_DIR is not a git repo — clone to a temp directory and rsync.
+    WORK_DIR="$(mktemp -d /tmp/ibkr-update-XXXXXX)"
+    info "Cloning into temp directory ${WORK_DIR} ..."
+    git clone --depth=1 --branch "$BRANCH" "$REMOTE_URL" "$WORK_DIR"
+    COMMIT_AFTER=$(git -C "$WORK_DIR" rev-parse HEAD)
+    info "Fetched commit $(git -C "$WORK_DIR" rev-parse --short HEAD): $(git -C "$WORK_DIR" log -1 --format='%s')"
 fi
 
 # ---------------------------------------------------------------------------
 # Step 3 — Sync files to deployment directory
 # ---------------------------------------------------------------------------
-if [[ "$REPO_ROOT" != "$APP_DIR" ]]; then
+if [[ "$WORK_DIR" != "$APP_DIR" ]]; then
     step "3 — Syncing files to ${APP_DIR}"
     rsync -a \
         --exclude='.git' --exclude='*.lgbm' --exclude='.env' \
         --exclude='venv/' --exclude='logs/' --exclude='backups/' \
-        "${REPO_ROOT}/" "${APP_DIR}/"
+        "${WORK_DIR}/" "${APP_DIR}/"
     chown -R "${APP_USER}:${APP_USER}" "${APP_DIR}"
     chmod 755 "${APP_DIR}"
     info "Files synced to ${APP_DIR}."
 else
     step "3 — File sync"
-    info "Running from ${APP_DIR} — rsync skipped."
+    info "Deployed directly into ${APP_DIR} — rsync skipped."
 fi
 
 # ---------------------------------------------------------------------------
@@ -170,7 +189,7 @@ if [[ -f "$ALEMBIC_INI" ]]; then
     (cd "$APP_DIR" && sudo -u "$APP_USER" "$VENV/bin/alembic" upgrade head)
     info "Database migrations applied."
 else
-    info "alembic.ini not found — skipping migrations (no migrations exist yet)."
+    info "alembic.ini not found — skipping migrations."
 fi
 
 # ---------------------------------------------------------------------------
@@ -198,14 +217,19 @@ for SERVICE in ibkr-bot ibkr-web; do
     fi
 done
 
-# Disarm the error trap — update completed successfully
+# Disarm the exit trap — update completed successfully
 trap - EXIT
+
+# Cleanup temp clone if used
+if [[ -n "$WORK_DIR" && -d "$WORK_DIR" && "$WORK_DIR" != "$APP_DIR" ]]; then
+    rm -rf "$WORK_DIR"
+fi
 
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
-COMMIT_SHORT=$(git -C "$REPO_ROOT" rev-parse --short HEAD)
-COMMIT_MSG=$(git -C "$REPO_ROOT" log -1 --format='%s' | cut -c1-40)
+COMMIT_SHORT=$(git -C "${WORK_DIR:-$APP_DIR}" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+COMMIT_MSG=$(git -C "${WORK_DIR:-$APP_DIR}" log -1 --format='%s' 2>/dev/null | cut -c1-40 || echo "")
 echo ""
 echo "╔══════════════════════════════════════════════════════════════╗"
 echo "║                    Update complete!                          ║"
