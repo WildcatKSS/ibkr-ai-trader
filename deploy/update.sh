@@ -47,6 +47,31 @@ VENV="${APP_DIR}/venv"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 
+# Allow an explicit override: GIT_REPO=/path/to/repo sudo bash deploy/update.sh
+# This is useful when the git clone lives outside APP_DIR.
+if [[ -n "${GIT_REPO:-}" ]]; then
+    REPO_ROOT="$GIT_REPO"
+fi
+
+# Verify that REPO_ROOT is actually a git repository.
+if ! git -C "$REPO_ROOT" rev-parse --git-dir &>/dev/null; then
+    echo ""
+    echo -e "${RED}[ERROR]${NC} ${REPO_ROOT} is not a git repository."
+    echo ""
+    echo "  The update script needs a git repository to pull from."
+    echo "  Choose one of the following:"
+    echo ""
+    echo "  Option A — Clone directly into the deployment directory (recommended):"
+    echo "    cd /opt"
+    echo "    git clone <your-repo-url> ibkr-trader"
+    echo "    # then run: sudo bash /opt/ibkr-trader/deploy/update.sh"
+    echo ""
+    echo "  Option B — Keep the repo elsewhere and pass the path:"
+    echo "    GIT_REPO=/home/trader/ibkr-ai-trader sudo bash deploy/update.sh"
+    echo ""
+    exit 1
+fi
+
 # ---------------------------------------------------------------------------
 # Banner
 # ---------------------------------------------------------------------------
