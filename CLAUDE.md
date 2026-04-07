@@ -39,8 +39,11 @@ python db/seed.py
 # Run tests
 pytest tests/
 
-# Update deployment after a git pull
+# Update from GitHub (SSH default; HTTPS: GITHUB_TOKEN=ghp_xxx sudo bash deploy/update.sh)
 sudo bash deploy/update.sh
+
+# Uninstall the bot from the server (interactive, asks per component)
+sudo bash deploy/uninstall.sh
 
 # Run backtesting engine
 python -m bot.backtesting.engine --instrument AAPL --start 2024-01-01 --end 2024-12-31 --timeframe 5min
@@ -57,21 +60,24 @@ python -m bot.ml.versioning --rollback <version>
 ## Repository Structure
 
 ```
-bot/core/        Trading loop, IBKR connection, watchdog & reconnect logic, dry run mode
-bot/universe/    Daily stock/ETF scanner and Claude-powered selector
-bot/signals/     LightGBM → 15-min confirmation → Claude pipeline
-bot/ml/          LightGBM model, trainer, feature engineering, versioning, A/B test
-bot/risk/        Position sizing, gap filter, circuit breaker
-bot/orders/      Order executor, fill monitor, EOD close routine
-bot/backtesting/ Historical simulation engine
-bot/alerts/      Email and webhook notifications
-bot/utils/       Logger, NYSE calendar, config loader
+bot/core/        Trading loop (engine.py), SIGTERM handler (__main__.py)
+bot/universe/    Daily scanner (scanner.py), criteria scoring (criteria.py), Claude selector (selector.py)
+bot/signals/     Technical indicators (indicators.py), 15-min filter + Claude signal (generator.py)
+bot/ml/          Feature engineering (features.py), LightGBM singleton (model.py),
+                 version manifest (versioning.py), training pipeline (trainer.py), models/
+bot/risk/        Circuit breaker + position sizing (manager.py)
+bot/orders/      IBKRBroker protocol + fill monitoring (executor.py), EOD close (eod_close.py)
+bot/backtesting/ Historical simulation engine — not yet implemented
+bot/alerts/      Email + webhook notifications (notifier.py)
+bot/utils/       Logger (logger.py), NYSE calendar (calendar.py), config loader (config.py)
 
-web/api/         FastAPI backend and all route handlers
-web/frontend/    Browser-based management dashboard
+web/api/         FastAPI backend: main.py, auth.py — routes not yet fully implemented
+web/frontend/    Browser-based management dashboard — not yet implemented
 
-db/              SQLAlchemy models, Alembic migrations, seed data
-deploy/          Nginx config, systemd services, setup.sh
+db/              SQLAlchemy models: LogEntry, Setting, Trade (models.py)
+                 Alembic migrations (migrations/), seed data (seed.py), session (session.py)
+deploy/          Server scripts: setup.sh, update.sh, uninstall.sh
+                 systemd/: ibkr-bot.service, ibkr-web.service
 logs/            Rotating log files per category
 ```
 
@@ -323,3 +329,7 @@ All ERROR and CRITICAL entries are also written to `logs/errors.log` automatical
 - Do not add universe criteria logic outside `bot/universe/criteria.py` — all scoring weights and thresholds live there and are configurable via DB settings
 - Do not call Claude API inside `bot/universe/scanner.py` or `bot/universe/criteria.py` — the Claude call belongs exclusively in `bot/universe/selector.py`
 - The `DataProvider` protocol (`bot/universe/scanner.py`) must be injected — never instantiate an IBKR connection directly inside the universe package
+- The `IBKRBroker` protocol (`bot/orders/executor.py`) must be injected — never import `ib_insync` directly inside `bot/orders/`
+- Do not add circuit breaker or position sizing logic outside `bot/risk/manager.py`
+- Do not add signal pipeline logic outside `bot/signals/generator.py` — the 15-min confirmation filter and Claude call both live there
+- `bot/orders/eod_close.py` must always be reachable from every code path that opens a position — this is the no-overnight-positions guarantee

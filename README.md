@@ -2,7 +2,7 @@
 
 An open-source intraday trading bot for Interactive Brokers, powered by Claude AI. Focused exclusively on **stocks and ETFs** — positions are opened and closed within the same trading day, with no overnight exposure.
 
-> ⚠️ **Work in progress** — This repository is in active development. The infrastructure layer is complete: logging, configuration, database models, migrations, seed data, server setup and update scripts, systemd services, NYSE trading calendar, the FastAPI web skeleton, and the trading loop skeleton — with a full 149-test suite. Trading signal and IBKR integration components are not yet implemented. See the [Development Status](#️-development-status) section for a full overview. **Contributions are welcome** — see [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
+> ⚠️ **Work in progress** — The core trading pipeline is implemented and tested: universe selection (daily scanner + bullish criteria scoring + Claude selector), signal generation (LightGBM + 15-min confirmation filter + Claude), risk management (circuit breaker + position sizing), order execution (fill monitoring + market-order fallback), EOD close routine, and email/webhook alerting — with a full **421-test suite**. The IBKR broker integration layer, web frontend, and backtesting engine are not yet implemented. See the [Development Status](#️-development-status) section for a full overview. **Contributions are welcome** — see [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
 
 -----
 
@@ -100,53 +100,32 @@ An open-source intraday trading bot for Interactive Brokers, powered by Claude A
 ibkr-ai-trader/
 ├── bot/
 │   ├── core/
-│   │   ├── __init__.py
-│   │   ├── trader.py               # Main trading loop
-│   │   ├── connection.py           # IBKR API connection handler
-│   │   ├── dry_run.py              # Dry run mode: full pipeline without order submission
-│   │   └── watchdog.py             # Reconnect logic & process health monitoring
+│   │   ├── engine.py               # Main trading loop + universe scan + signal dispatch
+│   │   └── __main__.py             # Process entry point (SIGTERM, TRADING_MODE)
 │   ├── universe/
-│   │   ├── __init__.py
-│   │   ├── scanner.py              # Scans IBKR universe (stocks & ETFs)
-│   │   ├── selector.py             # Claude-powered instrument selection
-│   │   └── approval.py             # Human-approval workflow (pending / approve / reject)
+│   │   ├── scanner.py              # Daily OHLCV scan + DataProvider protocol
+│   │   ├── criteria.py             # Bullish criteria scoring (75 core + 35 bonus pts)
+│   │   └── selector.py             # Claude-powered final instrument selection
 │   ├── signals/
-│   │   ├── __init__.py
-│   │   ├── generator.py            # Signal pipeline: LightGBM → 15-min confirmation → Claude
-│   │   ├── sentiment.py            # News & sentiment analysis via Claude
-│   │   └── indicators.py           # Technical indicator calculation via ta
+│   │   ├── indicators.py           # Technical indicators via ta (5-min candles)
+│   │   └── generator.py            # 15-min confirmation filter + Claude signal
 │   ├── ml/
-│   │   ├── __init__.py
-│   │   ├── model.py                # LightGBM model wrapper (predict / load / save)
-│   │   ├── trainer.py              # Model training & periodic retraining pipeline
-│   │   ├── features.py             # Feature engineering (VWAP dev, volume ratio, RSI, etc.)
-│   │   ├── versioning.py           # Model version registry, tagging & rollback
-│   │   ├── ab_test.py              # A/B testing: paper vs live model comparison
-│   │   └── models/                 # Saved & versioned model files (.lgbm)
+│   │   ├── features.py             # 24-feature engineering from enriched OHLCV
+│   │   ├── model.py                # Thread-safe LightGBM singleton (predict / reload)
+│   │   ├── versioning.py           # Version manifest, register, rollback CLI
+│   │   ├── trainer.py              # Training pipeline + forward-return labelling + CLI
+│   │   └── models/                 # .lgbm model files (gitignored, .gitkeep present)
 │   ├── risk/
-│   │   ├── __init__.py
-│   │   ├── manager.py              # Risk management & capital exposure enforcement
-│   │   ├── position_sizer.py       # Kelly Criterion / fixed % / fixed amount position sizing
-│   │   ├── gap_filter.py           # Earnings & extreme gap detection for universe filtering
-│   │   └── circuit_breaker.py      # Drawdown & loss threshold enforcement
+│   │   └── manager.py              # Circuit breaker + position sizing (fixed/Kelly)
 │   ├── orders/
-│   │   ├── __init__.py
-│   │   ├── executor.py             # Autonomous order execution (entry/adjust/exit)
-│   │   ├── fill_monitor.py         # Order fill monitoring & timeout/cancel logic
-│   │   └── eod_close.py            # End-of-day position close routine
-│   ├── backtesting/
-│   │   ├── __init__.py
-│   │   ├── engine.py               # Backtesting engine (historical simulation)
-│   │   ├── data_loader.py          # Load historical OHLCV data
-│   │   └── report.py               # Backtest results & metrics
+│   │   ├── executor.py             # IBKRBroker protocol, order execution, fill monitoring
+│   │   └── eod_close.py            # End-of-day close all positions
 │   ├── alerts/
-│   │   ├── __init__.py
-│   │   ├── notifier.py             # Alert dispatcher
-│   │   ├── email.py                # Email notifications
-│   │   └── webhook.py              # HTTP webhook dispatcher for external integrations
+│   │   └── notifier.py             # Email (SMTP/TLS) + HTTP webhook alerts
+│   ├── backtesting/                # Not yet implemented
 │   └── utils/
 │       ├── __init__.py
-│       ├── logger.py               # Central logging — disk-first, async MariaDB flush
+│       ├── logger.py               # Disk-first, async MariaDB flush logger
 │       ├── calendar.py             # NYSE trading calendar & market hours validation
 │       └── config.py
 ├── web/
@@ -175,14 +154,12 @@ ibkr-ai-trader/
 │   ├── migrations/                 # Alembic database migrations
 │   └── seed.py                     # Initial data / default config
 ├── deploy/
-│   ├── nginx/
-│   │   └── ibkr-trader.conf        # Nginx reverse proxy config
 │   ├── systemd/
 │   │   ├── ibkr-bot.service        # Systemd service: trading bot
 │   │   └── ibkr-web.service        # Systemd service: web API
-│   └── setup.sh                    # Ubuntu server setup script
-├── config/
-│   └── instruments.yaml            # Fallback/manual stock & ETF watchlist (used in manual mode)
+│   ├── setup.sh                    # Ubuntu server setup (idempotent, 15 steps)
+│   ├── update.sh                   # Update from GitHub (SSH or HTTPS token)
+│   └── uninstall.sh                # Interactive full removal script
 ├── logs/
 │   ├── trading.log                 # Order execution & trade lifecycle
 │   ├── universe.log                # Universe scan, scoring & selection results
@@ -338,24 +315,45 @@ The web interface is now available at `https://your-domain.com` (HTTPS mode) or 
 To deploy a new version of the bot on an existing Ubuntu server, use the included update script:
 
 ```bash
-sudo bash deploy/update.sh
+sudo bash /opt/ibkr-trader/deploy/update.sh
 ```
 
-The script performs all steps automatically and safely:
+The script fetches the latest code directly from GitHub — no local git clone required:
 
-|Step|What happens                                                              |
-|----|--------------------------------------------------------------------------|
-|1   |`ibkr-bot` and `ibkr-web` are stopped                                    |
-|2   |`git pull origin main` — fetches the latest code                          |
-|3   |Files are synced to `/opt/ibkr-trader` (`.env`, `venv`, `logs` untouched) |
-|4   |New or updated Python dependencies are installed                          |
-|5   |Pending database migrations are applied via Alembic                       |
-|6   |Nginx is reloaded                                                         |
-|7   |`ibkr-bot` and `ibkr-web` are restarted                                  |
+|Step|What happens                                                                           |
+|----|---------------------------------------------------------------------------------------|
+|1   |`ibkr-bot` and `ibkr-web` are stopped                                                 |
+|2   |Code is pulled from GitHub (`wildcatkss/ibkr-ai-trader`, branch `main`)               |
+|3   |Files are synced to `/opt/ibkr-trader` (`.env`, `venv`, `logs` untouched)             |
+|4   |New or updated Python dependencies are installed                                       |
+|5   |Pending database migrations are applied via Alembic                                    |
+|6   |Nginx is reloaded                                                                      |
+|7   |`ibkr-bot` and `ibkr-web` are restarted                                               |
+
+**Authentication:**
+- Public repo (default): SSH key of the root user, no configuration needed.
+- Private repo: `GITHUB_TOKEN=ghp_xxx sudo bash deploy/update.sh`
 
 **Safety:** if any step fails, the services are automatically restarted with the previous version — the server is never left in a stopped state.
 
 > ⚠ Do not run this during an active trading session. The bot is stopped for the duration of the update.
+
+-----
+
+## Uninstalling
+
+To remove IBKR AI Trader from the server:
+
+```bash
+sudo bash /opt/ibkr-trader/deploy/uninstall.sh
+```
+
+The script asks for confirmation before touching anything and lets you choose per component:
+
+- Always removed: services, app directory, system user, cron job, fail2ban and logrotate config
+- On request: database backup, MariaDB database/user, Nginx config, Let's Encrypt certificate, UFW rules
+
+Python 3.11 and Node.js are never removed (shared system packages).
 
 -----
 
@@ -502,7 +500,7 @@ The bot uses a built-in NYSE trading calendar to determine whether the market is
 - **Early-close days** — e.g. the Friday after Thanksgiving (market closes at 13:00 ET)
 - **Weekend detection** — no trading on Saturdays or Sundays
 
-The calendar is provided by the `trading_calendars` Python library, which is kept up to date with official NYSE schedules. If the bot is started on a non-trading day, it logs the fact and enters idle state until the next market open.
+The calendar is provided by the `exchange_calendars` Python library (the maintained fork of the abandoned `trading_calendars`), which is kept up to date with official NYSE schedules. If the bot is started on a non-trading day, it logs the fact and enters idle state until the next market open.
 
 -----
 
@@ -1097,62 +1095,51 @@ This project is for **educational purposes only**. Trading financial instruments
 
 ## Development Status
 
-This project is currently in the **documentation and architecture phase**. The table below tracks which components still need to be built:
+This project is currently in active development. The table below tracks which components have been built and what remains:
 
-|Component                                                           |Status    |
-|--------------------------------------------------------------------|----------|
-|README & architecture                                               |✅ Complete|
-|`CLAUDE.md` — Claude Code instructions                              |✅ Complete|
-|`bot/utils/logger.py` — disk-first async logging                    |✅ Complete|
-|`bot/utils/config.py` — MariaDB settings loader with TTL cache      |✅ Complete|
-|`tests/` — test suite (149 tests, SQLite fixtures, no real API calls)|✅ Complete|
-|`deploy/setup.sh` — server setup script                             |✅ Complete|
-|`deploy/update.sh` — server update script                           |✅ Complete|
-|`requirements.txt`                                                  |✅ Complete|
-|`.gitignore`                                                        |✅ Complete|
-|`.env.example`                                                      |✅ Complete|
-|`CONTRIBUTING.md`                                                   |✅ Complete|
-|`bot/utils/calendar.py` — NYSE trading calendar                     |✅ Complete|
-|`bot/core/` — trading loop skeleton (SIGTERM, TRADING_MODE, EOD)    |✅ Complete|
-|`web/api/` — FastAPI skeleton (/health, /api/status, settings, logs)|✅ Complete|
-|`main.py` — application entry point                                 |🔲 To do   |
-|`config/instruments.yaml` — default instrument configuration        |🔲 To do   |
-|`bot/universe/` — Claude-powered stock scanner                      |🔲 To do   |
-|`bot/signals/` — signal pipeline (LightGBM → 15-min filter → Claude)|🔲 To do   |
-|`bot/ml/` — LightGBM model, trainer, feature engineering            |🔲 To do   |
-|`bot/risk/` — risk manager & circuit breaker                        |🔲 To do   |
-|`bot/orders/` — order executor & EOD close                          |🔲 To do   |
-|`bot/alerts/` — email notifications                                 |🔲 To do   |
-|`bot/core/watchdog.py` — reconnect logic & health monitoring        |🔲 To do   |
-|`bot/backtesting/` — backtesting engine                             |🔲 To do   |
-|`web/frontend/` — management dashboard                              |🔲 To do   |
-|`db/` — MariaDB models, migrations & seed                           |✅ Complete|
-|`alembic.ini` — Alembic migration configuration                     |✅ Complete|
-|`deploy/nginx/` — Nginx config                                      |🔲 To do   |
-|`deploy/systemd/` — systemd services                                |✅ Complete|
-|Order fill monitoring & timeout logic                               |🔲 To do   |
-|Slippage & commission simulation in backtesting                     |🔲 To do   |
-|API rate limiting                                                   |🔲 To do   |
-|`bot/risk/position_sizer.py` — position sizing model                |🔲 To do   |
-|`bot/risk/gap_filter.py` — earnings & gap protection                |🔲 To do   |
-|`bot/ml/versioning.py` — model version control & rollback           |🔲 To do   |
-|`bot/ml/ab_test.py` — A/B model testing                             |🔲 To do   |
-|`bot/alerts/webhook.py` — HTTP webhook dispatcher                   |🔲 To do   |
-|`web/api/routes/audit.py` — configuration audit trail               |🔲 To do   |
-|`web/api/routes/costs.py` — cost dashboard                          |🔲 To do   |
-|`web/api/routes/export.py` — trade export (CSV/Excel)               |🔲 To do   |
-|Dry run mode                                                        |🔲 To do   |
-|HTTPS / Let’s Encrypt — direct from setup.sh                        |✅ Complete|
-|2FA implementation                                                  |🔲 To do   |
-|Position sizing model (fixed %, Kelly)                              |🔲 To do   |
-|Per-instrument & per-sector capital caps                            |🔲 To do   |
-|Gap protection filter                                               |🔲 To do   |
-|LightGBM model version control & rollback                           |🔲 To do   |
-|A/B model shadow testing                                            |🔲 To do   |
-|Configuration audit trail                                           |🔲 To do   |
-|Cost dashboard (Claude API + commissions)                           |🔲 To do   |
-|Trade export (CSV / Excel)                                          |🔲 To do   |
-|Webhook support                                                     |🔲 To do   |
+|Component                                                                    |Status     |
+|-----------------------------------------------------------------------------|-----------|
+|README & architecture                                                        |✅ Complete|
+|`CLAUDE.md` — Claude Code instructions                                       |✅ Complete|
+|`CONTRIBUTING.md`                                                            |✅ Complete|
+|`requirements.txt`                                                           |✅ Complete|
+|`deploy/setup.sh` — full Ubuntu server setup (15 steps, idempotent)         |✅ Complete|
+|`deploy/update.sh` — update from GitHub (SSH + HTTPS token support)         |✅ Complete|
+|`deploy/uninstall.sh` — interactive removal script                          |✅ Complete|
+|`deploy/systemd/` — systemd service units                                   |✅ Complete|
+|`db/` — SQLAlchemy models (LogEntry, Setting, Trade), migrations, seed      |✅ Complete|
+|`alembic.ini` — Alembic migration configuration                             |✅ Complete|
+|`bot/utils/logger.py` — disk-first async logging                            |✅ Complete|
+|`bot/utils/config.py` — MariaDB settings loader with TTL cache              |✅ Complete|
+|`bot/utils/calendar.py` — NYSE trading calendar                             |✅ Complete|
+|`bot/core/engine.py` — full trading loop (scan → signals → EOD close)       |✅ Complete|
+|`bot/universe/` — scanner + criteria scoring + Claude selector              |✅ Complete|
+|`bot/signals/indicators.py` — technical indicators via ta (5-min candles)   |✅ Complete|
+|`bot/signals/generator.py` — 15-min filter + Claude signal pipeline         |✅ Complete|
+|`bot/ml/features.py` — 24-feature engineering                               |✅ Complete|
+|`bot/ml/model.py` — thread-safe LightGBM singleton                         |✅ Complete|
+|`bot/ml/versioning.py` — model version manifest + rollback CLI              |✅ Complete|
+|`bot/ml/trainer.py` — training pipeline + forward-return labelling + CLI    |✅ Complete|
+|`bot/risk/manager.py` — circuit breaker + position sizing (fixed/Kelly)     |✅ Complete|
+|`bot/orders/executor.py` — IBKRBroker protocol + fill monitoring + fallback |✅ Complete|
+|`bot/orders/eod_close.py` — EOD close all positions + P&L calculation       |✅ Complete|
+|`bot/alerts/notifier.py` — email (SMTP/TLS) + HTTP webhook alerts           |✅ Complete|
+|`web/api/` — FastAPI skeleton (/health, /api/status, settings, logs, auth)  |✅ Complete|
+|HTTPS / Let’s Encrypt — provisioned by setup.sh                             |✅ Complete|
+|`tests/` — 421 tests (mocked IBKR, mocked Claude API, SQLite fixtures)      |✅ Complete|
+|`bot/core/watchdog.py` — IBKR reconnect logic & health monitoring           |🔲 To do   |
+|`bot/backtesting/` — historical simulation engine                           |🔲 To do   |
+|`bot/risk/gap_filter.py` — earnings & pre-market gap protection             |🔲 To do   |
+|`bot/ml/ab_test.py` — A/B shadow model testing                             |🔲 To do   |
+|IBKR broker integration (`IBKRBroker` implementation via `ib_insync`)        |🔲 To do   |
+|`web/frontend/` — management dashboard                                      |🔲 To do   |
+|`web/api/routes/audit.py` — configuration audit trail                       |🔲 To do   |
+|`web/api/routes/costs.py` — Claude API + commission cost dashboard          |🔲 To do   |
+|`web/api/routes/export.py` — trade export (CSV / Excel)                     |🔲 To do   |
+|API rate limiting on web endpoints                                           |🔲 To do   |
+|2FA (TOTP) for web interface                                                 |🔲 To do   |
+|Per-instrument & per-sector capital caps                                     |🔲 To do   |
+|Slippage & commission simulation in backtesting                              |🔲 To do   |
 
 -----
 

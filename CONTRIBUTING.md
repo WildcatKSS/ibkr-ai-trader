@@ -6,7 +6,7 @@ Thank you for your interest in contributing. This document explains how to get i
 
 ## Before you start
 
-This project is in active development — most source code components are not yet implemented. Check the [Development Status](README.md#️-development-status) table in the README before picking something up, so you don't duplicate work already in progress.
+This project is in active development. The core trading pipeline is implemented — check the [Development Status](README.md#️-development-status) table in the README before picking something up, so you don't duplicate work already in progress.
 
 If you want to build something substantial (a new module, a change to the signal pipeline, a new risk model), **open an issue first** to discuss the approach. This avoids wasted effort if the direction doesn't fit the architecture.
 
@@ -15,15 +15,19 @@ If you want to build something substantial (a new module, a change to the signal
 ## What you can contribute
 
 ### Good first contributions
-- Bug reports and bug fixes in existing files (`deploy/setup.sh`, `deploy/update.sh`, `bot/utils/logger.py`, `bot/utils/config.py`)
-- Additional tests for existing modules in `tests/` — the suite uses in-memory SQLite and mocks, no real services needed
+- Bug reports and bug fixes in any existing module
+- Additional tests for existing modules in `tests/` — the suite uses in-memory SQLite and mocks, no real services or API keys needed
 - Improvements to documentation (README, CLAUDE.md, inline comments)
 - Security findings — see [Reporting a vulnerability](#reporting-a-vulnerability)
 
 ### Larger contributions
-- Implementing modules listed as **🔲 To do** in the Development Status table
+- Implementing modules listed as **🔲 To do** in the Development Status table — in particular:
+  - `bot/core/watchdog.py` — IBKR reconnect logic
+  - `bot/backtesting/` — historical simulation engine
+  - `bot/risk/gap_filter.py` — earnings & pre-market gap protection
+  - IBKR broker integration (concrete `IBKRBroker` implementation via `ib_insync`)
+  - `web/frontend/` — management dashboard
 - Adding new features that align with the architecture described in `CLAUDE.md`
-- Improvements to the backtesting engine or ML pipeline
 
 -----
 
