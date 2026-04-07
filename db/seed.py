@@ -161,6 +161,29 @@ DEFAULTS: list[tuple[str, str, str]] = [
         "Minimum 5-day price return (%) that counts as strong momentum, "
         "in addition to the gap-up check.",
     ),
+    # ── ML model ─────────────────────────────────────────────────────────────
+    (
+        "ML_FORWARD_BARS",
+        "6",
+        "Number of 5-min bars ahead used to compute the training label "
+        "(6 bars = 30 min forward return).",
+    ),
+    (
+        "ML_LONG_THRESHOLD_PCT",
+        "0.3",
+        "Minimum forward return (%) to assign the 'long' label during training.",
+    ),
+    (
+        "ML_SHORT_THRESHOLD_PCT",
+        "0.3",
+        "Minimum forward drop (%) to assign the 'short' label during training.",
+    ),
+    (
+        "ML_MIN_PROBABILITY",
+        "0.55",
+        "Minimum predicted class probability required to act on a LightGBM signal. "
+        "Predictions below this threshold are treated as 'no_trade'.",
+    ),
     # ── Position sizing ──────────────────────────────────────────────────────
     (
         "POSITION_SIZING_METHOD",

@@ -174,6 +174,57 @@ Never skip or reorder these steps.
 
 -----
 
+## ML Module — `bot/ml/`
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `bot/ml/features.py` | `build(df)` → 24-column feature DataFrame from an enriched OHLCV frame |
+| `bot/ml/model.py` | Thread-safe singleton; `predict(features)` → `Prediction(label, probability)` |
+| `bot/ml/versioning.py` | Version manifest (`version.json`), `register_version()`, `rollback()` |
+| `bot/ml/trainer.py` | `train(df)` → trains LightGBM, saves `.lgbm` file, registers version |
+| `bot/ml/models/` | Model files (`.lgbm`); never committed to git |
+
+### Labels
+
+For each bar *t*, the forward return over `ML_FORWARD_BARS` (default 6 = 30 min) is computed:
+
+    forward_return = log(close[t + forward_bars] / close[t])
+
+| Class | Value | Condition |
+|---|---|---|
+| `no_trade` | 0 | default |
+| `long` | 1 | forward_return ≥ ML_LONG_THRESHOLD_PCT / 100 |
+| `short` | 2 | forward_return ≤ −ML_SHORT_THRESHOLD_PCT / 100 |
+
+### 24 Feature Names
+
+`rsi`, `stoch_k`, `stoch_d`, `macd_hist`, `adx`, `adx_pos`, `adx_neg`,
+`ema_cross`, `bb_pct`, `bb_width`, `bb_squeeze`, `atr_pct`, `mfi`,
+`obv_slope`, `volume_ratio`, `close_vs_ema9`, `close_vs_ema21`,
+`close_vs_vwap`, `body_ratio`, `upper_wick_ratio`, `lower_wick_ratio`,
+`return_1bar`, `return_3bar`, `return_6bar`
+
+### Operational settings (configured via web interface, stored in DB)
+
+| Setting | Default | Description |
+|---|---|---|
+| `ML_FORWARD_BARS` | 6 | Bars ahead for forward-return label |
+| `ML_LONG_THRESHOLD_PCT` | 0.3 | Min return % for long label |
+| `ML_SHORT_THRESHOLD_PCT` | 0.3 | Min drop % for short label |
+| `ML_MIN_PROBABILITY` | 0.55 | Min predicted probability to act on signal |
+
+### Rules
+
+- `bot/ml/` never calls the Claude API — that belongs in `bot/signals/generator.py`
+- The model singleton is loaded lazily on first `predict()` call; call `reload_model()` after retraining
+- `predict()` returns `("no_trade", 0.0)` when no model is loaded or features contain NaN
+- Retrain via CLI: `python -m bot.ml.trainer --retrain --data path/to/data.csv`
+- Roll back via CLI: `python -m bot.ml.versioning --rollback <version>`
+
+-----
+
 ## Logging Rules
 
 Every module uses `bot/utils/logger.py` — never use `print()` or the standard `logging` module directly.
