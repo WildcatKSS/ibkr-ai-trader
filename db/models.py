@@ -1,9 +1,5 @@
 """
 SQLAlchemy ORM models for ibkr-ai-trader.
-
-Only models that are needed by the current codebase are defined here.
-Module-specific models (Trade, Signal, Position, etc.) will be added in
-their respective modules when those components are built.
 """
 
 from __future__ import annotations
@@ -11,7 +7,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import JSON
 
@@ -73,3 +69,54 @@ class Setting(Base):
 
     def __repr__(self) -> str:
         return f"<Setting key={self.key} value={self.value!r}>"
+
+
+class Trade(Base):
+    """
+    One intraday trade executed (or logged in dryrun) by the bot.
+
+    Lifecycle:  pending → open → filled → closed
+                                        ↘ cancelled / error
+    In dryrun mode the status is set to "dryrun" after creation.
+    """
+
+    __tablename__ = "trades"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    # ── Identity ──────────────────────────────────────────────────────────
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    action: Mapped[str] = mapped_column(String(10), nullable=False)  # "long" | "short"
+    trading_mode: Mapped[str] = mapped_column(String(10), nullable=False)  # paper/live/dryrun
+    status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+
+    # ── Sizing & prices ───────────────────────────────────────────────────
+    shares: Mapped[int] = mapped_column(Integer, nullable=False)
+    entry_price: Mapped[float] = mapped_column(Float, nullable=False)   # intended entry
+    target_price: Mapped[float] = mapped_column(Float, nullable=False)
+    stop_price: Mapped[float] = mapped_column(Float, nullable=False)
+    fill_price: Mapped[float | None] = mapped_column(Float, nullable=True)   # actual fill
+    exit_price: Mapped[float | None] = mapped_column(Float, nullable=True)   # close price
+    pnl: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # ── IBKR ──────────────────────────────────────────────────────────────
+    ibkr_order_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # ── Signal provenance ─────────────────────────────────────────────────
+    ml_label: Mapped[str] = mapped_column(String(20), nullable=False)
+    ml_probability: Mapped[float] = mapped_column(Float, nullable=False)
+    confirmed_15min: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    explanation: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # ── Timestamps ────────────────────────────────────────────────────────
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    filled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    def __repr__(self) -> str:
+        return (
+            f"<Trade id={self.id} symbol={self.symbol} action={self.action} "
+            f"status={self.status}>"
+        )

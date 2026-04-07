@@ -276,6 +276,12 @@ DEFAULTS: list[tuple[str, str, str]] = [
         "false",
         "Enable HTTP webhook dispatch for trade events.",
     ),
+    (
+        "ALERTS_WEBHOOK_URL",
+        "",
+        "HTTP endpoint that receives POST requests for trade events. "
+        "Only used when ALERTS_WEBHOOKS_ENABLED is true.",
+    ),
 ]
 
 # ---------------------------------------------------------------------------
