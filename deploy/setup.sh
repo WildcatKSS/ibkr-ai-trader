@@ -370,6 +370,16 @@ if [[ "$REPO_ROOT" != "$APP_DIR" ]]; then
         --exclude='venv/' --exclude='logs/' --exclude='backups/' \
         "${REPO_ROOT}/" "${APP_DIR}/"
     info "Project files copied to ${APP_DIR}."
+
+    # Offer to remove the source directory now that files are in APP_DIR.
+    echo ""
+    read -rp "$(echo -e "${YELLOW}?${NC} Bronmap ${REPO_ROOT} verwijderen? (alleen de git-clone, niet ${APP_DIR}) [j/N]: ")" _RM_SRC
+    if [[ "${_RM_SRC,,}" =~ ^(j|y|ja|yes)$ ]]; then
+        rm -rf "$REPO_ROOT"
+        info "Bronmap ${REPO_ROOT} verwijderd."
+    else
+        info "Bronmap ${REPO_ROOT} blijft staan."
+    fi
 fi
 
 chown -R "${APP_USER}:${APP_USER}" "${APP_DIR}"
