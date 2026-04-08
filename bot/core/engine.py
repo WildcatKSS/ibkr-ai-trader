@@ -255,6 +255,41 @@ class TradingEngine:
                     error=str(exc),
                 )
 
+    def _has_open_position(self, symbol: str) -> bool:
+        """
+        Return True if there is already a pending/open/filled trade for
+        *symbol* today.  Prevents duplicate entries for the same symbol
+        within a single trading session.
+        """
+        from datetime import date, datetime, timezone
+
+        from sqlalchemy import select
+
+        from db.models import Trade
+        from db.session import get_session
+
+        today = date.today()
+        day_start = datetime(today.year, today.month, today.day, tzinfo=timezone.utc)
+        try:
+            with get_session() as session:
+                row = session.execute(
+                    select(Trade.id)
+                    .where(
+                        Trade.symbol == symbol,
+                        Trade.status.in_(["pending", "open", "filled", "dryrun"]),
+                        Trade.created_at >= day_start,
+                    )
+                    .limit(1)
+                ).scalar_one_or_none()
+            return row is not None
+        except Exception as exc:
+            log.warning(
+                "Cannot check open positions — allowing signal",
+                symbol=symbol,
+                error=str(exc),
+            )
+            return False  # fail open
+
     def _run_signal_for_symbol(
         self,
         symbol: str,
@@ -267,6 +302,14 @@ class TradingEngine:
         notify,
     ) -> None:
         """Run the pipeline for a single symbol."""
+        # Guard: skip if we already entered a position today for this symbol.
+        if self._has_open_position(symbol):
+            log.debug(
+                "Skipping signal — position already exists today",
+                symbol=symbol,
+            )
+            return
+
         # Fetch intraday bars
         if self._data_provider is None:
             log.warning("No data provider — cannot fetch bars", symbol=symbol)

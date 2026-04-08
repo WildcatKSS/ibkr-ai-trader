@@ -191,6 +191,40 @@ class TestExecuteTimeout:
         assert broker.place_order.call_count == 2
 
 
+class TestPollInterrupt:
+    """Verify that poll_interrupt wakes up _wait_for_fill immediately."""
+
+    def test_interrupt_returns_none(self):
+        import threading
+
+        import bot.orders.executor as executor_mod
+
+        broker = MagicMock(spec=IBKRBroker)
+        broker.get_order_status.return_value = ("Submitted", None)
+
+        # Pre-set the interrupt so the very first wait() returns immediately.
+        executor_mod.poll_interrupt.set()
+        try:
+            from bot.orders.executor import _wait_for_fill
+            result = _wait_for_fill(broker, 9999, timeout=60)
+        finally:
+            executor_mod.poll_interrupt.clear()  # reset for other tests
+
+        assert result is None
+
+    def test_no_interrupt_polls_normally(self):
+        """Without interrupt, a Filled status is returned correctly."""
+        import bot.orders.executor as executor_mod
+
+        broker = MagicMock(spec=IBKRBroker)
+        broker.get_order_status.return_value = ("Filled", 123.45)
+
+        executor_mod.poll_interrupt.clear()
+        from bot.orders.executor import _wait_for_fill
+        result = _wait_for_fill(broker, 9999, timeout=10)
+        assert result == pytest.approx(123.45)
+
+
 # ---------------------------------------------------------------------------
 # close_all_positions()
 # ---------------------------------------------------------------------------

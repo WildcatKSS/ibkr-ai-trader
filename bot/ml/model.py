@@ -96,13 +96,29 @@ def reload_model() -> bool:
     """
     Force-reload the model from disk (e.g., after retraining).
 
-    Returns True on success, False if no model file is found.
+    The entire clear-and-reload sequence is performed while holding the lock
+    so that other threads never observe a ``None`` booster between the clear
+    and the fresh load.
+
+    Returns True on success, False if no model file is found or loading fails.
     """
     global _booster, _loaded_path  # noqa: PLW0603
     with _lock:
         _booster = None
         _loaded_path = None
-    return _get_booster() is not None
+        path = _find_model_path()
+        if path is None:
+            log.warning("reload_model: no model file found — predictions return no_trade")
+            return False
+        try:
+            import lightgbm as lgb
+            _booster = lgb.Booster(model_file=str(path))
+            _loaded_path = path
+            log.info("LightGBM model reloaded", path=str(path))
+            return True
+        except Exception as exc:  # noqa: BLE001
+            log.error("reload_model: failed to load model", path=str(path), error=str(exc))
+            return False
 
 
 # ---------------------------------------------------------------------------

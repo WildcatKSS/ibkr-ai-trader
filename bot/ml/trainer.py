@@ -211,7 +211,8 @@ if __name__ == "__main__":
 
     data_path = Path(args.data)
     if not data_path.exists():
-        print(f"Error: data file not found: {data_path}", file=sys.stderr)
+        log.error("Data file not found", path=str(data_path))
+        sys.stderr.write(f"Error: data file not found: {data_path}\n")
         sys.exit(1)
 
     df = pd.read_csv(data_path, parse_dates=True, index_col=0)
@@ -221,4 +222,4 @@ if __name__ == "__main__":
         long_threshold_pct=args.long_threshold_pct,
         short_threshold_pct=args.short_threshold_pct,
     )
-    print(f"Trained model version: {version}")
+    sys.stdout.write(f"Trained model version: {version}\n")

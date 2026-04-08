@@ -229,7 +229,15 @@ def _circuit_breaker_check(portfolio_value: float, get_setting) -> str | None:
 
 
 def _query_today_stats(today: date) -> tuple[float, int]:
-    """Return (daily_pnl, consecutive_losses) from closed trades today."""
+    """
+    Return ``(daily_pnl, consecutive_losses)`` from closed trades.
+
+    *daily_pnl* sums only trades closed today.
+    *consecutive_losses* counts the unbroken losing streak at the tail of
+    today's trade history — it resets to 0 when a winning trade or any
+    trade from a previous day is encountered.  Yesterday's losses do NOT
+    carry over into today's streak.
+    """
     from sqlalchemy import select
 
     from db.models import Trade
@@ -244,16 +252,27 @@ def _query_today_stats(today: date) -> tuple[float, int]:
 
     today_pnl = 0.0
     consecutive = 0
-    for pnl, status, closed_at in rows:
+    streak_active = True  # False once a win or a non-today trade is seen
+
+    for pnl, _status, closed_at in rows:
         if pnl is None:
             continue
-        if closed_at and closed_at.date() == today:
+
+        is_today = closed_at is not None and closed_at.date() == today
+
+        if is_today:
             today_pnl += pnl
-        # Count consecutive losses from most recent backward
-        if pnl < 0:
-            consecutive += 1
-        else:
-            break  # streak broken
+
+        if streak_active:
+            if not is_today:
+                # Reached yesterday's trades — streak ends, but keep summing
+                # today_pnl if there are any today rows still ahead (there
+                # aren't, since we're ordered DESC).
+                streak_active = False
+            elif pnl < 0:
+                consecutive += 1
+            else:
+                streak_active = False  # today win breaks the streak
 
     return today_pnl, consecutive
 

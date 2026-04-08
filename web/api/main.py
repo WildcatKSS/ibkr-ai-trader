@@ -19,7 +19,8 @@ import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from fastapi import Depends, FastAPI, HTTPException, Path, Query, status
+from fastapi import Depends, FastAPI, HTTPException, Path, status
+from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
 
 from bot.utils.logger import get_logger, shutdown as logger_shutdown
@@ -140,6 +141,13 @@ async def list_settings() -> dict:
 _VALID_TRADING_MODES = frozenset({"paper", "live", "dryrun"})
 
 
+class UpdateSettingBody(BaseModel):
+    """Request body for PUT /api/settings/{key}."""
+
+    value: str = Field(..., max_length=10_000)
+    description: str | None = Field(default=None, max_length=500)
+
+
 @app.put(
     "/api/settings/{key}",
     tags=["settings"],
@@ -148,15 +156,16 @@ _VALID_TRADING_MODES = frozenset({"paper", "live", "dryrun"})
 )
 async def update_setting(
     key: str = Path(..., pattern=r"^[A-Z][A-Z0-9_]{0,99}$", max_length=100),
-    value: str = Query(..., max_length=10_000),
-    description: str | None = Query(default=None, max_length=500),
+    body: UpdateSettingBody = ...,
 ) -> dict:
     """
     Persist a new value for *key* in MariaDB and invalidate the config cache.
 
     Key must match ``^[A-Z][A-Z0-9_]{0,99}$`` (uppercase, digits, underscores).
-    Value is capped at 10 000 characters.  TRADING_MODE is validated against
-    the allowed set (``paper``, ``live``, ``dryrun``).
+    Value is sent in the JSON request body (not as a URL query parameter) to
+    prevent sensitive values from appearing in server logs or browser history.
+    TRADING_MODE is validated against the allowed set (``paper``, ``live``,
+    ``dryrun``).
 
     For existing keys the stored description is preserved unless *description*
     is explicitly supplied.  For new keys, *description* is optional.
@@ -164,7 +173,7 @@ async def update_setting(
     The value is stored as a string; type coercion happens at read time
     via ``bot.utils.config.get(..., cast=...)``.
     """
-    if key == "TRADING_MODE" and value not in _VALID_TRADING_MODES:
+    if key == "TRADING_MODE" and body.value not in _VALID_TRADING_MODES:
         raise HTTPException(
             status_code=422,
             detail=f"TRADING_MODE must be one of: {', '.join(sorted(_VALID_TRADING_MODES))}",
@@ -179,17 +188,22 @@ async def update_setting(
     with get_session() as session:
         obj = session.get(Setting, key)
         if obj is None:
-            obj = Setting(key=key, value=value, description=description, updated_at=now)
+            obj = Setting(
+                key=key,
+                value=body.value,
+                description=body.description,
+                updated_at=now,
+            )
             session.add(obj)
         else:
-            obj.value = value
+            obj.value = body.value
             obj.updated_at = now
-            if description is not None:   # only overwrite when caller supplied one
-                obj.description = description
+            if body.description is not None:  # only overwrite when caller supplied one
+                obj.description = body.description
 
     reload()
     log.info("Setting updated", key=key)
-    return {"key": key, "value": value}
+    return {"key": key, "value": body.value}
 
 
 # ---------------------------------------------------------------------------

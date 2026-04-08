@@ -162,23 +162,28 @@ if __name__ == "__main__":
     group.add_argument("--rollback", metavar="VERSION", help="Roll back to VERSION")
     args = parser.parse_args()
 
+    _out = sys.stdout.write
+
     if args.list:
         versions = list_versions()
         if not versions:
-            print("No versions registered.")
+            _out("No versions registered.\n")
         for v in versions:
             marker = " ← current" if v["version"] == get_current_version() else ""
-            print(f"{v['version']}{marker}  trained={v['trained_at']}  "
-                  f"samples={v['n_samples']}  metrics={v['metrics']}")
+            _out(
+                f"{v['version']}{marker}  trained={v['trained_at']}  "
+                f"samples={v['n_samples']}  metrics={v['metrics']}\n"
+            )
 
     elif args.current:
         cur = get_current_version()
-        print(cur if cur else "No current version set.")
+        _out((cur if cur else "No current version set.") + "\n")
 
     elif args.rollback:
         try:
             rollback(args.rollback)
-            print(f"Rolled back to {args.rollback}.")
+            _out(f"Rolled back to {args.rollback}.\n")
         except ValueError as exc:
-            print(f"Error: {exc}", file=sys.stderr)
+            log.error("Rollback failed", version=args.rollback, error=str(exc))
+            sys.stderr.write(f"Error: {exc}\n")
             sys.exit(1)

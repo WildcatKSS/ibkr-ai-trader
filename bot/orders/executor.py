@@ -19,6 +19,7 @@ Design
 
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -34,6 +35,10 @@ log = get_logger("trading")
 
 # Seconds between fill-status polls
 _POLL_INTERVAL = 2
+
+# Set this event externally (e.g. from the shutdown handler) to interrupt
+# fill polling immediately instead of waiting out the full poll interval.
+poll_interrupt = threading.Event()
 
 
 # ---------------------------------------------------------------------------
@@ -323,7 +328,11 @@ def _wait_for_fill(
     """
     Poll until the order is filled or *timeout* seconds elapses.
 
-    Returns the fill price or ``None`` on timeout.
+    Uses ``threading.Event.wait()`` instead of ``time.sleep()`` so that the
+    ``poll_interrupt`` event can wake up the loop immediately on shutdown,
+    avoiding blocking the trading thread for the full poll interval.
+
+    Returns the fill price or ``None`` on timeout or interrupt.
     """
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -331,7 +340,8 @@ def _wait_for_fill(
             status, fill_price = broker.get_order_status(order_id)
         except Exception as exc:
             log.warning("get_order_status error", order_id=order_id, error=str(exc))
-            time.sleep(_POLL_INTERVAL)
+            if poll_interrupt.wait(timeout=_POLL_INTERVAL):
+                return None  # interrupted — likely shutdown
             continue
 
         if status == "Filled" and fill_price is not None:
@@ -340,7 +350,8 @@ def _wait_for_fill(
         if status in {"Cancelled", "Inactive"}:
             return None
 
-        time.sleep(_POLL_INTERVAL)
+        if poll_interrupt.wait(timeout=_POLL_INTERVAL):
+            return None  # interrupted — likely shutdown
 
     return None
 

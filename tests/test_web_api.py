@@ -155,7 +155,9 @@ class TestUpdateSetting:
             patch("db.session.get_session", return_value=cm),
             patch("bot.utils.config.reload"),
         ):
-            response = client.put("/api/settings/TRADING_MODE?value=paper")
+            response = client.put(
+                "/api/settings/TRADING_MODE", json={"value": "paper"}
+            )
         assert response.status_code == 200
 
     def test_returns_key_and_value(self):
@@ -164,7 +166,9 @@ class TestUpdateSetting:
             patch("db.session.get_session", return_value=cm),
             patch("bot.utils.config.reload"),
         ):
-            data = client.put("/api/settings/TRADING_MODE?value=paper").json()
+            data = client.put(
+                "/api/settings/TRADING_MODE", json={"value": "paper"}
+            ).json()
         assert data["key"] == "TRADING_MODE"
         assert data["value"] == "paper"
 
@@ -174,7 +178,9 @@ class TestUpdateSetting:
             patch("db.session.get_session", return_value=cm),
             patch("bot.utils.config.reload"),
         ):
-            response = client.put("/api/settings/NEW_KEY?value=hello")
+            response = client.put(
+                "/api/settings/NEW_KEY", json={"value": "hello"}
+            )
         assert response.status_code == 200
         from db.models import Setting
         added_types = [type(c.args[0]) for c in mock_session.add.call_args_list]
@@ -188,7 +194,7 @@ class TestUpdateSetting:
             patch("db.session.get_session", return_value=cm),
             patch("bot.utils.config.reload"),
         ):
-            client.put("/api/settings/TRADING_MODE?value=live")
+            client.put("/api/settings/TRADING_MODE", json={"value": "live"})
         assert existing.value == "live"
 
     def test_invalid_trading_mode_value_returns_422(self):
@@ -197,16 +203,18 @@ class TestUpdateSetting:
             patch("db.session.get_session", return_value=cm),
             patch("bot.utils.config.reload"),
         ):
-            response = client.put("/api/settings/TRADING_MODE?value=INVALID")
+            response = client.put(
+                "/api/settings/TRADING_MODE", json={"value": "INVALID"}
+            )
         assert response.status_code == 422
 
     def test_key_with_lowercase_returns_422(self):
-        response = client.put("/api/settings/bad_key?value=x")
+        response = client.put("/api/settings/bad_key", json={"value": "x"})
         assert response.status_code == 422
 
     def test_value_max_length_enforced(self):
         long_value = "x" * 10_001
-        response = client.put(f"/api/settings/SOME_KEY?value={long_value}")
+        response = client.put("/api/settings/SOME_KEY", json={"value": long_value})
         assert response.status_code == 422
 
     def test_negative_limit_clamped_to_one(self):
@@ -217,7 +225,9 @@ class TestUpdateSetting:
 
     def test_requires_auth_when_no_override(self):
         app.dependency_overrides.clear()
-        response = client.put("/api/settings/TRADING_MODE?value=paper")
+        response = client.put(
+            "/api/settings/TRADING_MODE", json={"value": "paper"}
+        )
         assert response.status_code == 401
         app.dependency_overrides[require_auth] = lambda: None
 

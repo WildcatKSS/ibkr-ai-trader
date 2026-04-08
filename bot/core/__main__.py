@@ -21,9 +21,10 @@ log = get_logger("ibkr")
 
 def _handle_signal(signum, frame):
     log.info("Shutdown signal received", signal=signum)
-    # The engine checks _shutdown_requested on each tick.
     from bot.core.engine import request_shutdown
+    from bot.orders.executor import poll_interrupt
     request_shutdown()
+    poll_interrupt.set()  # wake up any blocked fill-poll loop immediately
 
 
 def main() -> None:
@@ -33,9 +34,11 @@ def main() -> None:
     from bot.utils.config import ConfigError, get
 
     try:
-        trading_mode = get("TRADING_MODE")
+        # Default to "dryrun" when the key is absent (e.g. before first seed).
+        # A ConfigError here means the database itself is unreachable — abort.
+        trading_mode = get("TRADING_MODE", default="dryrun")
     except ConfigError as exc:
-        log.error("Cannot read TRADING_MODE from database — aborting", error=str(exc))
+        log.error("Cannot connect to database — aborting", error=str(exc))
         logger_shutdown()
         sys.exit(1)
 
