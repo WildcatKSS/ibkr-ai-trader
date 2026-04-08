@@ -244,3 +244,57 @@ class TestMain:
             from bot.core.__main__ import main
             main()  # must not raise or hang
         mock_engine.run.assert_called_once()
+
+    def test_missing_trading_mode_defaults_to_dryrun(self):
+        """When TRADING_MODE is absent from DB, default to dryrun (not abort)."""
+        from bot.utils.config import ConfigError
+
+        request_shutdown()
+        mock_engine = MagicMock()
+
+        def get_side_effect(key, *, default=None, cast=str):
+            if key == "TRADING_MODE":
+                return default  # simulates missing key with default="dryrun"
+            raise ConfigError("unexpected")
+
+        with (
+            patch("bot.utils.config.get", side_effect=get_side_effect),
+            patch("bot.core.engine.TradingEngine", return_value=mock_engine),
+            patch("bot.utils.logger.shutdown"),
+        ):
+            from bot.core.__main__ import main
+            main()
+        mock_engine.run.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# TradingEngine._has_open_position
+# ---------------------------------------------------------------------------
+
+
+class TestHasOpenPosition:
+    def test_no_trade_returns_false(self):
+        e = _make_engine()
+        with patch("db.session.get_session") as mock_gs:
+            mock_session = MagicMock()
+            mock_session.__enter__ = lambda s: mock_session
+            mock_session.__exit__ = MagicMock(return_value=False)
+            mock_session.execute.return_value.scalar_one_or_none.return_value = None
+            mock_gs.return_value = mock_session
+            assert e._has_open_position("AAPL") is False
+
+    def test_existing_trade_returns_true(self):
+        e = _make_engine()
+        with patch("db.session.get_session") as mock_gs:
+            mock_session = MagicMock()
+            mock_session.__enter__ = lambda s: mock_session
+            mock_session.__exit__ = MagicMock(return_value=False)
+            mock_session.execute.return_value.scalar_one_or_none.return_value = 42
+            mock_gs.return_value = mock_session
+            assert e._has_open_position("AAPL") is True
+
+    def test_db_error_returns_false(self):
+        """On DB error, fail open (allow signal rather than block everything)."""
+        e = _make_engine()
+        with patch("db.session.get_session", side_effect=Exception("db down")):
+            assert e._has_open_position("AAPL") is False

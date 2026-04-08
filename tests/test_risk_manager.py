@@ -242,3 +242,96 @@ class TestDecisionFields:
         ):
             decision = check(_signal(target=103.0), 100_000.0, trading_mode="paper")
         assert decision.target_price == 103.0
+
+
+# ---------------------------------------------------------------------------
+# _query_today_stats — consecutive loss counting correctness
+# ---------------------------------------------------------------------------
+
+
+class TestQueryTodayStats:
+    """Unit tests for the circuit-breaker stat query (no DB needed)."""
+
+    def _run(self, rows):
+        """Call _query_today_stats with mocked DB rows."""
+        from datetime import date
+        from unittest.mock import MagicMock, patch
+
+        from bot.risk.manager import _query_today_stats
+
+        with patch("db.session.get_session") as mock_gs:
+            mock_session = MagicMock()
+            mock_session.__enter__ = lambda s: mock_session
+            mock_session.__exit__ = MagicMock(return_value=False)
+            mock_session.execute.return_value.all.return_value = rows
+            mock_gs.return_value = mock_session
+            return _query_today_stats(date.today())
+
+    def _today(self, hour=10):
+        from datetime import date, datetime, timezone
+        d = date.today()
+        return datetime(d.year, d.month, d.day, hour, 0, 0, tzinfo=timezone.utc)
+
+    def _yesterday(self):
+        from datetime import date, datetime, timedelta, timezone
+        d = date.today() - timedelta(days=1)
+        return datetime(d.year, d.month, d.day, 10, 0, 0, tzinfo=timezone.utc)
+
+    def test_no_trades(self):
+        pnl, consec = self._run([])
+        assert pnl == 0.0
+        assert consec == 0
+
+    def test_today_losses_counted(self):
+        rows = [
+            (-100.0, "closed", self._today(15)),
+            (-50.0, "closed", self._today(14)),
+        ]
+        pnl, consec = self._run(rows)
+        assert pnl == pytest.approx(-150.0)
+        assert consec == 2
+
+    def test_today_win_breaks_streak(self):
+        # most-recent is a win → streak = 0 even though earlier trade was loss
+        rows = [
+            (200.0, "closed", self._today(15)),   # win (most recent)
+            (-50.0, "closed", self._today(14)),   # loss
+        ]
+        pnl, consec = self._run(rows)
+        assert pnl == pytest.approx(150.0)
+        assert consec == 0
+
+    def test_yesterday_losses_do_not_carry_over(self):
+        # 5 losses yesterday, 0 trades today → streak must be 0
+        rows = [
+            (-100.0, "closed", self._yesterday()),
+            (-100.0, "closed", self._yesterday()),
+            (-100.0, "closed", self._yesterday()),
+            (-100.0, "closed", self._yesterday()),
+            (-100.0, "closed", self._yesterday()),
+        ]
+        pnl, consec = self._run(rows)
+        assert pnl == pytest.approx(0.0)   # none are today
+        assert consec == 0                 # yesterday streak doesn't carry
+
+    def test_today_losses_then_yesterday_losses(self):
+        # 2 today losses + 5 yesterday losses → streak is 2 (today only)
+        rows = [
+            (-50.0, "closed", self._today(15)),
+            (-50.0, "closed", self._today(14)),
+            (-100.0, "closed", self._yesterday()),
+            (-100.0, "closed", self._yesterday()),
+            (-100.0, "closed", self._yesterday()),
+        ]
+        pnl, consec = self._run(rows)
+        assert pnl == pytest.approx(-100.0)
+        assert consec == 2
+
+    def test_null_pnl_skipped(self):
+        rows = [
+            (None, "closed", self._today(15)),
+            (-50.0, "closed", self._today(14)),
+        ]
+        pnl, consec = self._run(rows)
+        assert pnl == pytest.approx(-50.0)
+        assert consec == 1
