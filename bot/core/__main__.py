@@ -94,16 +94,32 @@ def main() -> None:
                 )
                 broker = None
 
+    # ── Broker factory for hot-reload mode switching ────────────────────
+    ibkr_port = int(os.getenv("IBKR_PORT", "7497")) if os.getenv("IBKR_PORT") else None
+
+    def _broker_factory() -> IBKRConnection | None:
+        """Create a new IBKRConnection.  Used by the engine when the user
+        switches TRADING_MODE via the web UI at runtime."""
+        if ibkr_port is None:
+            return None
+        return IBKRConnection(port=ibkr_port)
+
     # ── Run engine ───────────────────────────────────────────────────────
     from bot.core.engine import TradingEngine
 
-    engine = TradingEngine(trading_mode=trading_mode, data_provider=broker)
+    engine = TradingEngine(
+        trading_mode=trading_mode,
+        data_provider=broker,
+        broker_factory=_broker_factory if ibkr_port is not None else None,
+    )
     try:
         engine.run()
     finally:
-        if broker is not None:
+        # Disconnect whatever broker the engine is currently using.
+        current_provider = engine._data_provider
+        if current_provider is not None and hasattr(current_provider, "disconnect"):
             try:
-                broker.disconnect()
+                current_provider.disconnect()
             except Exception:
                 pass
         log.info("Bot stopped")

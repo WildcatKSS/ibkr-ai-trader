@@ -10,7 +10,8 @@ Rules:
 from __future__ import annotations
 
 import threading
-from unittest.mock import MagicMock, call, patch
+from datetime import date
+from unittest.mock import ANY, MagicMock, call, patch
 
 import pytest
 
@@ -234,6 +235,120 @@ class TestScanUniverseDryrun:
 
 
 # ---------------------------------------------------------------------------
+# TradingEngine._handle_mode_change — hot-reload via web UI
+# ---------------------------------------------------------------------------
+
+
+class TestHandleModeChange:
+    def test_dryrun_to_paper_connects_broker(self):
+        """Switching from dryrun to paper should connect a new broker."""
+        mock_broker = MagicMock()
+        factory = MagicMock(return_value=mock_broker)
+        e = TradingEngine(
+            trading_mode="dryrun", tick_interval=0, broker_factory=factory,
+        )
+        e._handle_mode_change("paper")
+
+        assert e._trading_mode == "paper"
+        factory.assert_called_once()
+        mock_broker.connect.assert_called_once()
+        assert e._data_provider is mock_broker
+        assert e._watchlist == []
+        assert e._last_scan_date is None
+
+    def test_paper_to_dryrun_closes_positions_and_disconnects(self):
+        """Switching from paper to dryrun should close positions and disconnect."""
+        mock_broker = MagicMock()
+        mock_broker.disconnect = MagicMock()
+        e = TradingEngine(
+            trading_mode="paper", tick_interval=0, data_provider=mock_broker,
+        )
+        with patch.object(e, "_eod_close") as mock_eod:
+            e._handle_mode_change("dryrun")
+
+        mock_eod.assert_called_once()
+        mock_broker.disconnect.assert_called_once()
+        assert e._trading_mode == "dryrun"
+
+    def test_paper_to_live_reconnects(self):
+        """Switching between paper and live should reconnect the broker."""
+        old_broker = MagicMock()
+        new_broker = MagicMock()
+        factory = MagicMock(return_value=new_broker)
+        e = TradingEngine(
+            trading_mode="paper", tick_interval=0,
+            data_provider=old_broker, broker_factory=factory,
+        )
+        with patch.object(e, "_eod_close"):
+            e._handle_mode_change("live")
+
+        old_broker.disconnect.assert_called_once()
+        factory.assert_called_once()
+        new_broker.connect.assert_called_once()
+        assert e._trading_mode == "live"
+        assert e._data_provider is new_broker
+
+    def test_broker_connect_failure_falls_back_to_dryrun(self):
+        """If broker connection fails during switch, fall back to dryrun."""
+        mock_broker = MagicMock()
+        mock_broker.connect.side_effect = ConnectionError("refused")
+        factory = MagicMock(return_value=mock_broker)
+        e = TradingEngine(
+            trading_mode="dryrun", tick_interval=0, broker_factory=factory,
+        )
+        e._handle_mode_change("paper")
+
+        assert e._trading_mode == "dryrun"  # fell back
+        assert e._data_provider is None
+
+    def test_no_broker_factory_stays_dryrun(self):
+        """Without a broker factory, cannot switch to paper/live."""
+        e = TradingEngine(trading_mode="dryrun", tick_interval=0)
+        e._handle_mode_change("paper")
+
+        assert e._trading_mode == "dryrun"  # couldn't switch
+        assert e._data_provider is None
+
+    def test_mode_change_resets_watchlist(self):
+        """After mode change, watchlist and scan date are reset."""
+        mock_broker = MagicMock()
+        factory = MagicMock(return_value=mock_broker)
+        e = TradingEngine(
+            trading_mode="dryrun", tick_interval=0, broker_factory=factory,
+        )
+        e._watchlist = ["AAPL", "MSFT"]
+        e._last_scan_date = date.today()
+
+        e._handle_mode_change("paper")
+        assert e._watchlist == []
+        assert e._last_scan_date is None
+
+    def test_tick_detects_mode_change(self):
+        """_tick should detect when TRADING_MODE differs and call _handle_mode_change."""
+        e = TradingEngine(trading_mode="dryrun", tick_interval=0)
+        with (
+            patch("bot.utils.config.get", return_value="paper"),
+            patch("bot.utils.calendar.is_trading_day", return_value=False),
+            patch.object(e, "_handle_mode_change") as mock_handle,
+            patch.object(e, "_scan_universe"),
+        ):
+            e._tick()
+        mock_handle.assert_called_once_with("paper")
+
+    def test_tick_same_mode_no_change(self):
+        """_tick should not call _handle_mode_change when mode hasn't changed."""
+        e = TradingEngine(trading_mode="dryrun", tick_interval=0)
+        with (
+            patch("bot.utils.config.get", return_value="dryrun"),
+            patch("bot.utils.calendar.is_trading_day", return_value=False),
+            patch.object(e, "_handle_mode_change") as mock_handle,
+            patch.object(e, "_scan_universe"),
+        ):
+            e._tick()
+        mock_handle.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # TradingEngine._eod_close
 # ---------------------------------------------------------------------------
 
@@ -325,7 +440,11 @@ class TestMain:
             from bot.core.__main__ import main
             main()
         mock_broker.connect.assert_called_once()
-        MockTE.assert_called_once_with(trading_mode="dryrun", data_provider=mock_broker)
+        # Verify engine received the broker as data_provider and a factory.
+        call_kwargs = MockTE.call_args.kwargs
+        assert call_kwargs["trading_mode"] == "dryrun"
+        assert call_kwargs["data_provider"] is mock_broker
+        assert call_kwargs["broker_factory"] is not None
 
     def test_dryrun_without_ibkr_port_no_broker(self):
         """Dryrun mode without IBKR_PORT skips broker creation."""
@@ -340,7 +459,10 @@ class TestMain:
         ):
             from bot.core.__main__ import main
             main()
-        MockTE.assert_called_once_with(trading_mode="dryrun", data_provider=None)
+        call_kwargs = MockTE.call_args.kwargs
+        assert call_kwargs["trading_mode"] == "dryrun"
+        assert call_kwargs["data_provider"] is None
+        assert call_kwargs["broker_factory"] is None
 
     def test_paper_mode_requires_ibkr(self):
         """Paper mode requires IBKR connection; failure aborts."""
