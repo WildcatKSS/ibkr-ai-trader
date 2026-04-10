@@ -127,6 +127,7 @@ class TestTick:
             patch("bot.utils.calendar.is_market_open", return_value=market_open),
             patch("bot.utils.calendar.minutes_until_close", return_value=mins_left),
             patch("bot.utils.config.get", return_value=eod_minutes),
+            patch.object(e, "_scan_universe"),
             patch.object(e, "_run_signals") as mock_signals,
             patch.object(e, "_eod_close") as mock_eod,
         ):
@@ -166,6 +167,7 @@ class TestTick:
             patch("bot.utils.calendar.is_market_open", return_value=True),
             patch("bot.utils.calendar.minutes_until_close", return_value=10),
             patch("bot.utils.config.get", side_effect=ValueError("bad")),
+            patch.object(e, "_scan_universe"),
             patch.object(e, "_run_signals") as mock_signals,
             patch.object(e, "_eod_close") as mock_eod,
         ):
@@ -190,6 +192,45 @@ class TestRunSignals:
     def test_live_logs_stub(self):
         e = _make_engine("live")
         e._run_signals()  # stub — must not raise
+
+
+# ---------------------------------------------------------------------------
+# TradingEngine._scan_universe — dryrun watchlist
+# ---------------------------------------------------------------------------
+
+
+class TestScanUniverseDryrun:
+    def test_dryrun_uses_configured_watchlist(self):
+        """In dryrun mode with data_provider and DRYRUN_WATCHLIST, the
+        engine should populate the watchlist from config."""
+        mock_provider = MagicMock()
+        e = TradingEngine(trading_mode="dryrun", tick_interval=0, data_provider=mock_provider)
+        with patch("bot.utils.config.get", return_value="AAPL,MSFT,NVDA"):
+            e._scan_universe()
+        assert e._watchlist == ["AAPL", "MSFT", "NVDA"]
+
+    def test_dryrun_empty_watchlist(self):
+        """Empty DRYRUN_WATCHLIST → empty watchlist."""
+        mock_provider = MagicMock()
+        e = TradingEngine(trading_mode="dryrun", tick_interval=0, data_provider=mock_provider)
+        with patch("bot.utils.config.get", return_value=""):
+            e._scan_universe()
+        assert e._watchlist == []
+
+    def test_dryrun_no_data_provider(self):
+        """Without a data provider, watchlist stays empty even if setting is set."""
+        e = TradingEngine(trading_mode="dryrun", tick_interval=0, data_provider=None)
+        with patch("bot.utils.config.get", return_value="AAPL,MSFT"):
+            e._scan_universe()
+        assert e._watchlist == []
+
+    def test_dryrun_watchlist_trims_whitespace(self):
+        """Handles spaces in the comma-separated list."""
+        mock_provider = MagicMock()
+        e = TradingEngine(trading_mode="dryrun", tick_interval=0, data_provider=mock_provider)
+        with patch("bot.utils.config.get", return_value=" SPY , AAPL , "):
+            e._scan_universe()
+        assert e._watchlist == ["SPY", "AAPL"]
 
 
 # ---------------------------------------------------------------------------
@@ -240,6 +281,7 @@ class TestMain:
             patch("bot.utils.config.get", return_value="dryrun"),
             patch("bot.core.engine.TradingEngine", return_value=mock_engine),
             patch("bot.utils.logger.shutdown"),
+            patch.dict("os.environ", {"IBKR_PORT": ""}, clear=False),
         ):
             from bot.core.__main__ import main
             main()  # must not raise or hang
@@ -261,10 +303,60 @@ class TestMain:
             patch("bot.utils.config.get", side_effect=get_side_effect),
             patch("bot.core.engine.TradingEngine", return_value=mock_engine),
             patch("bot.utils.logger.shutdown"),
+            patch.dict("os.environ", {"IBKR_PORT": ""}, clear=False),
         ):
             from bot.core.__main__ import main
             main()
         mock_engine.run.assert_called_once()
+
+    def test_dryrun_with_ibkr_port_connects(self):
+        """Dryrun mode with IBKR_PORT set attempts broker connection."""
+        request_shutdown()
+        mock_engine = MagicMock()
+        mock_broker = MagicMock()
+
+        with (
+            patch("bot.utils.config.get", return_value="dryrun"),
+            patch("bot.core.engine.TradingEngine", return_value=mock_engine) as MockTE,
+            patch("bot.utils.logger.shutdown"),
+            patch("bot.core.broker.IBKRConnection", return_value=mock_broker),
+            patch.dict("os.environ", {"IBKR_PORT": "7497"}, clear=False),
+        ):
+            from bot.core.__main__ import main
+            main()
+        mock_broker.connect.assert_called_once()
+        MockTE.assert_called_once_with(trading_mode="dryrun", data_provider=mock_broker)
+
+    def test_dryrun_without_ibkr_port_no_broker(self):
+        """Dryrun mode without IBKR_PORT skips broker creation."""
+        request_shutdown()
+        mock_engine = MagicMock()
+
+        with (
+            patch("bot.utils.config.get", return_value="dryrun"),
+            patch("bot.core.engine.TradingEngine", return_value=mock_engine) as MockTE,
+            patch("bot.utils.logger.shutdown"),
+            patch.dict("os.environ", {"IBKR_PORT": ""}, clear=False),
+        ):
+            from bot.core.__main__ import main
+            main()
+        MockTE.assert_called_once_with(trading_mode="dryrun", data_provider=None)
+
+    def test_paper_mode_requires_ibkr(self):
+        """Paper mode requires IBKR connection; failure aborts."""
+        mock_broker = MagicMock()
+        mock_broker.connect.side_effect = ConnectionError("refused")
+
+        with (
+            patch("bot.utils.config.get", return_value="paper"),
+            patch("bot.core.broker.IBKRConnection", return_value=mock_broker),
+            patch("bot.utils.logger.shutdown"),
+            patch.dict("os.environ", {"IBKR_PORT": "7497"}, clear=False),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            from bot.core.__main__ import main
+            main()
+        assert exc_info.value.code == 1
 
 
 # ---------------------------------------------------------------------------

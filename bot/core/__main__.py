@@ -11,10 +11,17 @@ Responsibilities:
   4. Drain the async logger on exit.
 """
 
+import os
 import signal
 import sys
 
+from dotenv import load_dotenv
+
 from bot.utils.logger import get_logger, shutdown as logger_shutdown
+
+# Idempotent — systemd already sets env vars via EnvironmentFile, but
+# load_dotenv() is needed for development outside systemd.
+load_dotenv()
 
 log = get_logger("ibkr")
 
@@ -52,12 +59,53 @@ def main() -> None:
 
     log.info("Bot starting", trading_mode=trading_mode)
 
+    # ── Create IBKR connection ───────────────────────────────────────────
+    from bot.core.broker import IBKRConnection
+
+    broker = None
+
+    if trading_mode in ("paper", "live"):
+        # Paper/live: IBKR connection is mandatory.
+        port = int(os.getenv("IBKR_PORT", "7497"))
+        broker = IBKRConnection(port=port)
+        try:
+            broker.connect()
+        except Exception as exc:
+            log.error(
+                "Cannot connect to IBKR — aborting",
+                error=str(exc),
+                port=port,
+            )
+            logger_shutdown()
+            sys.exit(1)
+    elif trading_mode == "dryrun":
+        # Dryrun: IBKR connection is optional (for data only, no orders).
+        port_str = os.getenv("IBKR_PORT", "")
+        if port_str:
+            port = int(port_str)
+            broker = IBKRConnection(port=port)
+            try:
+                broker.connect()
+                log.info("Dryrun: IBKR connected for data only", port=port)
+            except Exception as exc:
+                log.warning(
+                    "Dryrun: IBKR not available — running without data",
+                    error=str(exc),
+                )
+                broker = None
+
+    # ── Run engine ───────────────────────────────────────────────────────
     from bot.core.engine import TradingEngine
 
-    engine = TradingEngine(trading_mode=trading_mode)
+    engine = TradingEngine(trading_mode=trading_mode, data_provider=broker)
     try:
         engine.run()
     finally:
+        if broker is not None:
+            try:
+                broker.disconnect()
+            except Exception:
+                pass
         log.info("Bot stopped")
         logger_shutdown()
 

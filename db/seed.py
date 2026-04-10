@@ -45,6 +45,12 @@ DEFAULTS: list[tuple[str, str, str]] = [
         "dryrun",
         "Trading mode: 'dryrun' (log only), 'paper' (IBKR paper account), or 'live'.",
     ),
+    (
+        "DRYRUN_WATCHLIST",
+        "SPY,AAPL,MSFT,NVDA,TSLA",
+        "Comma-separated watchlist for dryrun mode (replaces the universe "
+        "scan). Leave empty to skip signal generation in dryrun.",
+    ),
     # ── Market timing ────────────────────────────────────────────────────────
     (
         "EOD_CLOSE_MINUTES",

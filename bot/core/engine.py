@@ -159,14 +159,29 @@ class TradingEngine:
         When no DataProvider is available (IBKR not yet connected) a warning
         is logged and the scan is skipped.
         """
-        from bot.universe.scanner import get_pool, load_scan_config, scan
-        from bot.universe.selector import select
         from bot.utils.config import get
 
         if self._trading_mode == "dryrun":
-            log.info("Dryrun mode — universe scan skipped, watchlist stays empty")
-            self._watchlist = []
+            # In dryrun, use a static watchlist from config instead of the
+            # full universe scan.  This allows testing the signal pipeline
+            # end-to-end without needing to run the scanner.
+            raw = get("DRYRUN_WATCHLIST", default="")
+            symbols = [s.strip() for s in raw.split(",") if s.strip()]
+            if symbols and self._data_provider is not None:
+                self._watchlist = symbols
+                log.info(
+                    "Dryrun mode — using configured watchlist",
+                    watchlist=symbols,
+                )
+            else:
+                log.info(
+                    "Dryrun mode — no watchlist configured or no data provider",
+                )
+                self._watchlist = []
             return
+
+        from bot.universe.scanner import get_pool, load_scan_config, scan
+        from bot.universe.selector import select
 
         if self._data_provider is None:
             log.warning(
