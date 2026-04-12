@@ -136,7 +136,9 @@ def build(df: pd.DataFrame) -> pd.DataFrame:
     obv = df["obv"]
     features["obv_slope"] = np.sign(obv - obv.shift(5)).fillna(0)
     vol_ma = volume.rolling(20).mean()
-    features["volume_ratio"] = volume / vol_ma.replace(0, np.nan)
+    volume_ratio = volume / vol_ma.replace(0, np.nan)
+    # Clamp extreme values to prevent inf from polluting the model.
+    features["volume_ratio"] = volume_ratio.clip(upper=50.0)
 
     # ── Price-relative ───────────────────────────────────────────────────────
     features["close_vs_ema9"] = (close - df["ema_9"]) / close.replace(0, np.nan) * 100.0
@@ -144,10 +146,13 @@ def build(df: pd.DataFrame) -> pd.DataFrame:
     features["close_vs_vwap"] = (close - df["vwap"]) / close.replace(0, np.nan) * 100.0
 
     # ── Candle structure ─────────────────────────────────────────────────────
-    range_ = (high - low).replace(0, np.nan)
-    features["body_ratio"] = (close - open_).abs() / range_
-    features["upper_wick_ratio"] = (high - pd.concat([open_, close], axis=1).max(axis=1)) / range_
-    features["lower_wick_ratio"] = (pd.concat([open_, close], axis=1).min(axis=1) - low) / range_
+    range_ = high - low
+    safe_range = range_.replace(0, np.nan)  # doji candles → NaN (no meaningful ratio)
+    features["body_ratio"] = (close - open_).abs() / safe_range
+    max_oc = pd.concat([open_, close], axis=1).max(axis=1)
+    min_oc = pd.concat([open_, close], axis=1).min(axis=1)
+    features["upper_wick_ratio"] = (high - max_oc) / safe_range
+    features["lower_wick_ratio"] = (min_oc - low) / safe_range
 
     # ── Short-term returns ───────────────────────────────────────────────────
     log_close = np.log(close.replace(0, np.nan))

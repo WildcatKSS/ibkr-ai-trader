@@ -45,8 +45,8 @@ sudo bash deploy/update.sh
 # Uninstall the bot from the server (interactive, asks per component)
 sudo bash deploy/uninstall.sh
 
-# Run backtesting engine
-python -m bot.backtesting.engine --instrument AAPL --start 2024-01-01 --end 2024-12-31 --timeframe 5min
+# Run backtesting engine (not yet implemented)
+# python -m bot.backtesting.engine --instrument AAPL --start 2024-01-01 --end 2024-12-31 --timeframe 5min
 
 # Retrain LightGBM model manually
 python -m bot.ml.trainer --retrain
@@ -60,7 +60,7 @@ python -m bot.ml.versioning --rollback <version>
 ## Repository Structure
 
 ```
-bot/core/        Trading loop (engine.py), SIGTERM handler (__main__.py)
+bot/core/        Trading loop (engine.py), IBKR connection (broker.py), SIGTERM handler (__main__.py)
 bot/universe/    Daily scanner (scanner.py), criteria scoring (criteria.py), Claude selector (selector.py)
 bot/signals/     Technical indicators (indicators.py), 15-min filter + Claude signal (generator.py)
 bot/ml/          Feature engineering (features.py), LightGBM singleton (model.py),
@@ -68,11 +68,12 @@ bot/ml/          Feature engineering (features.py), LightGBM singleton (model.py
 bot/risk/        Circuit breaker + position sizing (manager.py)
 bot/orders/      IBKRBroker protocol + fill monitoring (executor.py), EOD close (eod_close.py)
 bot/backtesting/ Historical simulation engine — not yet implemented
+bot/sentiment/   News & sentiment analysis (Alpaca + Finnhub) — not yet implemented
 bot/alerts/      Email + webhook notifications (notifier.py)
 bot/utils/       Logger (logger.py), NYSE calendar (calendar.py), config loader (config.py)
 
-web/api/         FastAPI backend: main.py, auth.py — routes not yet fully implemented
-web/frontend/    Browser-based management dashboard — not yet implemented
+web/api/         FastAPI backend: main.py (6 endpoints), auth.py (JWT + rate limiting)
+web/frontend/    React management dashboard — not yet implemented
 
 db/              SQLAlchemy models: LogEntry, Setting, Trade (models.py)
                  Alembic migrations (migrations/), seed data (seed.py), session (session.py)
@@ -186,7 +187,7 @@ Never skip or reorder these steps.
 
 | File | Purpose |
 |---|---|
-| `bot/ml/features.py` | `build(df)` → 24-column feature DataFrame from an enriched OHLCV frame |
+| `bot/ml/features.py` | `build(df)` → 25-column feature DataFrame from an enriched OHLCV frame |
 | `bot/ml/model.py` | Thread-safe singleton; `predict(features)` → `Prediction(label, probability)` |
 | `bot/ml/versioning.py` | Version manifest (`version.json`), `register_version()`, `rollback()` |
 | `bot/ml/trainer.py` | `train(df)` → trains LightGBM, saves `.lgbm` file, registers version |
@@ -313,6 +314,32 @@ All ERROR and CRITICAL entries are also written to `logs/errors.log` automatical
 - Never commit `.env` or any file containing secrets
 - Never commit model files (`*.lgbm`) — they are generated locally
 - Commit messages in English, present tense: "Add fill monitor timeout logic"
+
+-----
+
+## Hot-Reload Mode Switching
+
+The TradingEngine supports runtime `TRADING_MODE` changes via the web API without requiring a service restart.
+
+**How it works:**
+1. User updates `TRADING_MODE` via `PUT /api/settings/TRADING_MODE`
+2. Engine detects the change on the next tick (within 60 seconds via config cache TTL)
+3. `_handle_mode_change()` is called, which:
+   - Closes open positions if leaving paper/live mode
+   - Disconnects the old broker connection
+   - Creates a new broker connection via `broker_factory` if entering paper/live
+   - Falls back to dryrun if the new broker connection fails
+   - Resets the watchlist and forces a fresh universe scan
+
+**Implementation:**
+- `bot/core/engine.py`: `_handle_mode_change()` method, TRADING_MODE check at top of `_tick()`
+- `bot/core/__main__.py`: `_broker_factory()` closure passed to TradingEngine
+- `bot/core/broker.py`: `IBKRConnection` class with connect/disconnect lifecycle
+
+**Transitions:**
+- `paper/live → dryrun`: close positions, disconnect broker
+- `dryrun → paper/live`: connect broker (requires IBKR running)
+- `paper ↔ live`: close positions, reconnect broker (port may differ)
 
 -----
 

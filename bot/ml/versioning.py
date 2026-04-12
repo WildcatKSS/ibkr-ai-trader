@@ -137,14 +137,26 @@ def make_version_string() -> str:
 def _load_manifest() -> dict[str, Any]:
     if not _MANIFEST.exists():
         return {"current": None, "versions": []}
-    with _MANIFEST.open() as f:
-        return json.load(f)
+    try:
+        with _MANIFEST.open() as f:
+            data = json.load(f)
+        # Validate basic structure
+        if not isinstance(data.get("versions"), list):
+            data["versions"] = []
+        return data
+    except (json.JSONDecodeError, OSError) as exc:
+        log.error("Corrupt version manifest — returning empty", error=str(exc))
+        return {"current": None, "versions": []}
 
 
 def _save_manifest(manifest: dict[str, Any]) -> None:
     _MODELS_DIR.mkdir(parents=True, exist_ok=True)
-    with _MANIFEST.open("w") as f:
+    # Atomic write: write to a temp file first, then rename.
+    # This prevents a half-written manifest if the process crashes mid-write.
+    tmp = _MANIFEST.with_suffix(".tmp")
+    with tmp.open("w") as f:
         json.dump(manifest, f, indent=2)
+    tmp.replace(_MANIFEST)
 
 
 # ---------------------------------------------------------------------------

@@ -199,16 +199,16 @@ def _circuit_breaker_check(portfolio_value: float, get_setting) -> str | None:
         daily_loss_pct = get_setting("CIRCUIT_BREAKER_DAILY_LOSS_PCT", cast=float, default=3.0)
         max_consecutive = get_setting("CIRCUIT_BREAKER_CONSECUTIVE_LOSSES", cast=int, default=5)
     except Exception as exc:
-        log.warning("Cannot read circuit breaker settings", error=str(exc))
-        return None  # fail open — let the trade proceed
+        log.error("Cannot read circuit breaker settings — blocking trade (fail closed)", error=str(exc))
+        return "Circuit breaker settings unreadable — halting trades as a safety measure."
 
     today = date.today()
 
     try:
         daily_pnl, consecutive_losses = _query_today_stats(today)
     except Exception as exc:
-        log.warning("Cannot query trade stats for circuit breaker", error=str(exc))
-        return None  # fail open
+        log.error("Cannot query trade stats for circuit breaker — blocking trade (fail closed)", error=str(exc))
+        return "Cannot verify daily P&L — halting trades as a safety measure."
 
     # Daily loss check
     if portfolio_value > 0:

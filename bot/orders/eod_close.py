@@ -50,7 +50,20 @@ def close_all_positions(
         return results
 
     if broker is None:
-        log.error("EOD close: no broker configured, cannot close positions")
+        log.error(
+            "EOD close: no broker configured — POSITIONS MAY REMAIN OPEN OVERNIGHT",
+            trading_mode=trading_mode,
+        )
+        # Send an alert so the operator is aware of the critical failure.
+        try:
+            from bot.alerts.notifier import notify
+            notify("eod_close_failed", {
+                "reason": "No broker connection available at EOD close. "
+                          "Positions may remain open overnight.",
+                "trading_mode": trading_mode,
+            })
+        except BaseException:
+            pass  # alert failure must not mask the original error
         return results
 
     try:

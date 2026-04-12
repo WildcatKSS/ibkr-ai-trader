@@ -22,11 +22,10 @@ If you want to build something substantial (a new module, a change to the signal
 
 ### Larger contributions
 - Implementing modules listed as **🔲 To do** in the Development Status table — in particular:
-  - `bot/core/watchdog.py` — IBKR reconnect logic
   - `bot/backtesting/` — historical simulation engine
-  - `bot/risk/gap_filter.py` — earnings & pre-market gap protection
-  - IBKR broker integration (concrete `IBKRBroker` implementation via `ib_insync`)
-  - `web/frontend/` — management dashboard
+  - `bot/sentiment/` — news & sentiment analysis (Alpaca + Finnhub)
+  - `web/frontend/` — React management dashboard
+  - `web/api/` — trade history, performance, and portfolio API endpoints
 - Adding new features that align with the architecture described in `CLAUDE.md`
 
 -----

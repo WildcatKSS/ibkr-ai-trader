@@ -49,6 +49,23 @@ _rl_lock = threading.Lock()
 _failed_attempts: dict[str, collections.deque] = collections.defaultdict(collections.deque)
 
 
+def _get_client_ip(request: Request) -> str:
+    """
+    Extract the real client IP from the request.
+
+    Behind Nginx the direct ``request.client.host`` is always ``127.0.0.1``.
+    We trust the ``X-Forwarded-For`` / ``X-Real-IP`` headers that Nginx sets.
+    """
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        # X-Forwarded-For may contain multiple IPs; the first is the client.
+        return forwarded.split(",")[0].strip()
+    real_ip = request.headers.get("x-real-ip")
+    if real_ip:
+        return real_ip.strip()
+    return request.client.host if request.client else "unknown"
+
+
 def _check_rate_limit(ip: str) -> None:
     """Raise HTTP 429 if *ip* has exceeded the failed-login threshold."""
     now = time.monotonic()
@@ -153,7 +170,7 @@ async def login(body: LoginRequest, request: Request) -> dict:
     HTTP 429.  The password is compared in constant time to prevent timing
     attacks.  Tokens expire after 24 hours; re-authenticate to obtain a new one.
     """
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = _get_client_ip(request)
     _check_rate_limit(client_ip)
 
     expected = _web_password()

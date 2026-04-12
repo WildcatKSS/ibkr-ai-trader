@@ -350,15 +350,17 @@ def _check_candle_quality(
     c = close.tail(n).values
 
     range_ = h - lo
-    # Avoid division by zero for doji candles
+    # Use a safe denominator to avoid division-by-zero RuntimeWarnings.
+    # Elements where range_ == 0 (doji candles) get ratio 0.0.
     nonzero = range_ > 0
+    safe_range = np.where(nonzero, range_, 1.0)
 
     body = np.abs(c - o)
-    body_ratio = np.where(nonzero, body / range_, 0.0)
+    body_ratio = np.where(nonzero, body / safe_range, 0.0)
     strong_frac = float((body_ratio >= config.body_ratio_min).mean())
 
     upper_wick = h - np.maximum(o, c)
-    wick_ratio = np.where(nonzero, upper_wick / range_, 0.0)
+    wick_ratio = np.where(nonzero, upper_wick / safe_range, 0.0)
     small_frac = float((wick_ratio <= config.wick_ratio_max).mean())
 
     return (

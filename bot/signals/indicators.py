@@ -273,4 +273,5 @@ def _add_volume(df: pd.DataFrame) -> None:
         typical_price = (df["high"] + df["low"] + df["close"]) / 3
         cumulative_tp_vol = (typical_price * df["volume"]).cumsum()
         cumulative_vol = df["volume"].cumsum()
-        df["vwap"] = cumulative_tp_vol / cumulative_vol
+        # Guard against division by zero when cumulative volume is 0
+        df["vwap"] = cumulative_tp_vol / cumulative_vol.replace(0, float("nan"))
