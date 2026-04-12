@@ -2,7 +2,7 @@
 
 An open-source intraday trading bot for Interactive Brokers, powered by Claude AI. Focused exclusively on **stocks and ETFs** — positions are opened and closed within the same trading day, with no overnight exposure.
 
-> ⚠️ **Work in progress** — The core trading pipeline is implemented and tested: universe selection (daily scanner + bullish criteria scoring + Claude selector), signal generation (LightGBM + 15-min confirmation filter + Claude), risk management (circuit breaker + position sizing), order execution (fill monitoring + market-order fallback), EOD close routine, and email/webhook alerting — with a full **421-test suite**. The IBKR broker integration layer, web frontend, and backtesting engine are not yet implemented. See the [Development Status](#️-development-status) section for a full overview. **Contributions are welcome** — see [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
+> ⚠️ **Work in progress** — The core trading pipeline is complete and tested: IBKR broker integration, universe selection, signal generation (LightGBM + 15-min filter + Claude), risk management (circuit breaker + position sizing), order execution (fill monitoring + market-order fallback), EOD close routine, and email/webhook alerting — with a **255-test suite**. The web frontend, backtesting engine, and news/sentiment module are not yet implemented. See the [Development Status](#-development-status) section for a full overview. **Contributions are welcome** — see [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
 
 -----
 
@@ -21,8 +21,8 @@ An open-source intraday trading bot for Interactive Brokers, powered by Claude A
 
 - **Universe selection** — Claude autonomously scans and selects the most promising stocks & ETFs for intraday trading, with configurable autonomous or human-approval mode
 - **AI-powered trading signals** — LightGBM generates intraday signals on 5-min candles, confirmed on 15-min timeframe, with Claude providing reasoning and context
-- **News & sentiment analysis** — Real-time news is processed by Claude to gauge market sentiment
-- **Explainability** — Every automated action, including universe selection, is explained in plain language by Claude and visible in the web interface
+- **News & sentiment analysis** — Real-time news is processed by Claude to gauge market sentiment *(not yet implemented)*
+- **Explainability** — Every automated action, including universe selection, is explained in plain language by Claude and logged
 
 ### Risk & safety
 
@@ -34,21 +34,21 @@ An open-source intraday trading bot for Interactive Brokers, powered by Claude A
 
 ### Model & backtesting
 
-- **Backtesting** — Test strategies against historical market data before going live
-- **Model version control** — Every LightGBM retrain is versioned and stored; roll back to any previous model via the web interface
-- **A/B model testing** — Run a new model version in paper trading alongside the live model before promoting it to production
+- **Backtesting** — Test strategies against historical market data before going live *(not yet implemented)*
+- **Model version control** — Every LightGBM retrain is versioned and stored; roll back to any previous model via CLI
+- **A/B model testing** — Run a new model version in paper trading alongside the live model before promoting it to production *(not yet implemented)*
 
 ### Monitoring & interface
 
-- **Performance dashboard** — P&L charts, Sharpe ratio, win rate, max drawdown, and more
-- **Cost dashboard** — Real-time overview of Claude API costs, IBKR commissions, and net P&L after all costs
+- **Performance dashboard** — P&L charts, Sharpe ratio, win rate, max drawdown, and more *(not yet implemented)*
+- **Cost dashboard** — Real-time overview of Claude API costs, IBKR commissions, and net P&L after all costs *(not yet implemented)*
 - **Comprehensive logging** — DEBUG-level logs across all categories, written to disk and MariaDB
 - **Alerting** — Real-time notifications via email on critical events
 - **Webhook support** — Push events to any external system via configurable HTTP webhooks
-- **Trade export** — Download full trade history as CSV or Excel from the web interface
-- **Configuration audit trail** — Every change made via the web interface is logged with timestamp and user
-- **Full web interface** — All settings and configuration managed via the browser; no SSH or config files needed after initial setup
-- **Security** — HTTPS via Let’s Encrypt, login with session timeout, and optional two-factor authentication (2FA)
+- **Trade export** — Download full trade history as CSV or Excel from the web interface *(not yet implemented)*
+- **Configuration audit trail** — Every change made via the web interface is logged with timestamp and user *(not yet implemented)*
+- **Web API** — Settings and configuration managed via REST API; web frontend not yet built
+- **Security** — HTTPS via Let’s Encrypt, JWT authentication with rate limiting
 
 -----
 
@@ -101,6 +101,7 @@ ibkr-ai-trader/
 ├── bot/
 │   ├── core/
 │   │   ├── engine.py               # Main trading loop + universe scan + signal dispatch
+│   │   ├── broker.py               # IBKR connection via ib_insync (data + orders)
 │   │   └── __main__.py             # Process entry point (SIGTERM, TRADING_MODE)
 │   ├── universe/
 │   │   ├── scanner.py              # Daily OHLCV scan + DataProvider protocol
@@ -122,7 +123,8 @@ ibkr-ai-trader/
 │   │   └── eod_close.py            # End-of-day close all positions
 │   ├── alerts/
 │   │   └── notifier.py             # Email (SMTP/TLS) + HTTP webhook alerts
-│   ├── backtesting/                # Not yet implemented
+│   ├── backtesting/                # Historical simulation engine (not yet implemented)
+│   ├── sentiment/                  # News & sentiment analysis (not yet implemented)
 │   └── utils/
 │       ├── __init__.py
 │       ├── logger.py               # Disk-first, async MariaDB flush logger
@@ -131,24 +133,9 @@ ibkr-ai-trader/
 ├── web/
 │   ├── api/
 │   │   ├── __init__.py
-│   │   ├── main.py                 # FastAPI app entrypoint
-│   │   ├── routes/
-│   │   │   ├── trades.py           # Trade history & open positions
-│   │   │   ├── signals.py          # AI signal feed
-│   │   │   ├── performance.py      # P&L, Sharpe ratio, drawdown metrics
-│   │   │   ├── backtests.py        # Run & view backtest results
-│   │   │   ├── health.py           # Health check endpoint (/health)
-│   │   │   ├── logs.py             # Log viewer: filter, search, export
-│   │   │   ├── config.py           # Bot configuration via UI
-│   │   │   ├── audit.py            # Configuration change audit trail
-│   │   │   ├── costs.py            # Claude API & IBKR commission cost dashboard
-│   │   │   ├── export.py           # Trade history export (CSV / Excel)
-│   │   │   └── auth.py             # Login / user management
-│   │   └── models.py               # Pydantic request/response models
-│   └── frontend/
-│       ├── index.html              # Dashboard
-│       ├── static/
-│       └── templates/
+│   │   ├── main.py                 # FastAPI app (health, status, settings, logs endpoints)
+│   │   └── auth.py                 # JWT authentication + rate limiting
+│   └── frontend/                   # React dashboard (not yet implemented)
 ├── db/
 │   ├── models.py                   # SQLAlchemy ORM models (MariaDB)
 │   ├── migrations/                 # Alembic database migrations
@@ -213,23 +200,21 @@ Certificate renewal is handled automatically via a systemd timer installed by Ce
 
 ### API Rate Limiting
 
-The FastAPI backend enforces rate limiting on all endpoints to protect against brute-force attacks on the login screen and excessive automated requests. Limits are applied per IP address:
+The login endpoint enforces rate limiting to protect against brute-force attacks. Limits are applied per IP address:
 
-|Endpoint           |Limit                |
+|Endpoint           |Limit               |
 |-------------------|---------------------|
-|`POST /auth/login` |10 requests / minute |
-|`GET /health`      |60 requests / minute |
-|All other endpoints|120 requests / minute|
+|`POST /api/auth/login` |5 failed attempts / 60 seconds |
 
-Exceeding the limit returns HTTP 429. Limits are configurable via the web interface under **Settings → Web & Security**.
+Exceeding the limit returns HTTP 429 Too Many Requests.
+
+### Authentication
+
+The web API uses JWT Bearer tokens with a **24-hour expiry**. Password comparison uses `hmac.compare_digest()` for constant-time comparison (prevents timing attacks). All protected endpoints require a valid JWT token in the `Authorization` header.
 
 ### Two-Factor Authentication (2FA)
 
-The web interface supports optional TOTP-based 2FA (compatible with Google Authenticator and similar apps). Enable it per user account in the web interface under Settings → Security. It is strongly recommended to enable 2FA when running in live trading mode.
-
-### Session Timeout
-
-Web sessions expire after **30 minutes** of inactivity. This is intentionally short given that the bot can place live trades. The timeout is configurable via the web interface under **Settings → Web & Security**.
+TOTP-based 2FA support is planned but **not yet implemented**. The `pyotp` dependency is included in `requirements.txt` for future use.
 
 -----
 
@@ -452,11 +437,9 @@ Claude determines when to close a position based on price target reached, stop-l
 
 -----
 
-### 6 · Sentiment Analysis
+### 6 · Sentiment Analysis *(not yet implemented)*
 
-Throughout the session, news headlines and articles for all instruments in the active universe are passed to Claude. Claude returns a sentiment score (positive / neutral / negative) and a short summary for each item. Sentiment feeds directly into signal generation and position management decisions.
-
-**Explained in the web interface:** which news items were processed, the sentiment score assigned, and how sentiment influenced any trading decisions made around that time.
+> This module is planned but not yet built. When implemented, news headlines and articles for all instruments in the active universe will be passed to Claude for sentiment scoring. See the [Development Status](#-development-status) section.
 
 -----
 
@@ -508,28 +491,29 @@ The calendar is provided by the `exchange_calendars` Python library (the maintai
 
 ### Reconnect Logic
 
-If the connection to IBKR (TWS or IB Gateway) is lost during a trading session, the bot does not crash — it enters a safe waiting state, cancels any pending orders it can no longer monitor, and attempts to reconnect automatically. Reconnect attempts follow an exponential backoff strategy (5s → 10s → 30s → 60s) up to a configurable maximum. If reconnection fails within the session, the circuit breaker is triggered and an email alert is sent.
-
-Reconnect behaviour is configurable via the web interface under **Settings → Risk & Circuit Breaker**.
+If the connection to IBKR (TWS or IB Gateway) is lost during a trading session, the bot does not crash. The `IBKRConnection._ensure_connected()` method attempts automatic reconnection with exponential backoff (2s → 4s) up to 3 attempts. If reconnection fails, a `ConnectionError` is raised and the current tick is skipped — the bot retries on the next tick (60 seconds later).
 
 ### Health Check Endpoint
 
-The web API exposes a `/health` endpoint that returns the current status of all critical subsystems:
+The web API exposes a `/health` endpoint (no authentication required) for liveness probes:
 
 ```json
 {
   "status": "ok",
-  "ibkr_connected": true,
-  "claude_api_reachable": true,
-  "db_connected": true,
-  "bot_running": true,
-  "trading_mode": "paper",
-  "open_positions": 2,
-  "last_signal_at": "2025-03-31T14:22:01Z"
+  "timestamp": "2025-03-31T14:22:01+00:00"
 }
 ```
 
-This endpoint can be polled by an external monitoring tool (e.g. UptimeRobot, Grafana, or a simple cron job) to alert you if any subsystem goes down.
+A separate authenticated endpoint `GET /api/status` returns bot runtime status:
+
+```json
+{
+  "trading_mode": "paper",
+  "market_open": true,
+  "trading_day": true,
+  "timestamp": "2025-03-31T14:22:01+00:00"
+}
+```
 
 -----
 
@@ -578,26 +562,9 @@ The bot sends real-time email notifications for critical events:
 
 -----
 
-## Backtesting
+## Backtesting *(not yet implemented)*
 
-Test your strategies on historical data before risking real capital:
-
-```bash
-cd /opt/ibkr-trader
-source venv/bin/activate
-python -m bot.backtesting.engine --instrument AAPL --start 2024-01-01 --end 2024-12-31 --timeframe 5min
-```
-
-Results are stored in MariaDB and viewable in the web interface, including P&L curve, trade log, Sharpe ratio, max drawdown, and win rate.
-
-The backtesting engine simulates realistic trading conditions by accounting for IBKR commissions and slippage. These values are configurable via the web interface under **Settings → Backtesting**:
-
-|Setting             |Default |Description                          |
-|--------------------|--------|-------------------------------------|
-|Commission per share|`$0.005`|IBKR Tiered rate, min $1.00 per order|
-|Slippage ticks      |`1`     |Assumed ticks of slippage on fills   |
-
-Backtest data also serves as the training dataset for the LightGBM model. The model is retrained periodically (default: weekly) to stay current with changing market conditions. Retraining can also be triggered manually from the web interface.
+> The backtesting engine is planned but not yet built. When implemented, it will reuse the existing signal pipeline (indicators, LightGBM, risk manager) to replay historical data and calculate performance metrics (Sharpe ratio, max drawdown, win rate). See the [Development Status](#-development-status) section.
 
 -----
 
@@ -635,16 +602,9 @@ Approved instruments enter the active trading universe immediately. Rejected one
 
 -----
 
-## Performance Dashboard
+## Performance Dashboard *(not yet implemented)*
 
-The web interface includes a live performance dashboard with:
-
-- **P&L chart** — cumulative profit/loss over time (daily, weekly, monthly)
-- **Win rate** — percentage of profitable trades
-- **Sharpe ratio** — risk-adjusted return
-- **Max drawdown** — largest peak-to-trough decline
-- **Trade log** — full history with Claude’s reasoning per trade
-- **Open positions** — live view of current holdings and unrealized P&L
+> The web frontend and performance dashboard are planned but not yet built. When implemented, the dashboard will show P&L charts, win rate, Sharpe ratio, max drawdown, trade log, and open positions. See the [Development Status](#-development-status) section.
 
 -----
 
@@ -679,19 +639,20 @@ Every log entry includes: **timestamp**, **log level**, **category**, **module**
 2025-03-31 14:22:03.115 | DEBUG | claude  | generator.explain:61 | Claude explanation: "Bought AAPL on momentum signal..."
 ```
 
-### Searching Logs via Web Interface
+### Querying Logs via API
 
-The log viewer in the web interface supports:
+The `GET /api/logs` endpoint supports filtering by category and level:
 
-- **Filter by category** — e.g. show only `trading` or `claude` logs
-- **Filter by level** — DEBUG / INFO / WARNING / ERROR / CRITICAL
-- **Full-text search** — search across all log messages
-- **Time range filter** — narrow down to a specific window
-- **Export** — download filtered results as CSV or plain text
+```bash
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8000/api/logs?category=trading&level=ERROR&limit=50"
+```
+
+A web-based log viewer with full-text search and time range filters is planned as part of the frontend.
 
 ### Log Retention
 
-Logs older than the configured retention period (default: 90 days) are automatically purged from both disk and MariaDB. Retention is configurable via the web interface under **Settings → Logging**.
+Disk logs are rotated automatically by logrotate (90-day retention, configured by `setup.sh`). MariaDB log entries are retained indefinitely; a purge mechanism is planned.
 
 -----
 
@@ -723,115 +684,80 @@ Every setting below is managed via **Settings** in the web interface. Changes ta
 
 #### Trading
 
-|Setting                   |Default   |Description                                      |
-|--------------------------|----------|-------------------------------------------------|
-|Trading mode              |`paper`   |`paper` · `live` · `dryrun`                      |
-|Allow short selling       |`false`   |Requires IBKR margin account                     |
-|Market open               |`09:30 ET`|NYSE/NASDAQ open time                            |
-|Market close              |`16:00 ET`|Market close time                                |
-|EOD close offset          |`15 min`  |Close all positions N minutes before market close|
-|Max simultaneous positions|`5`       |Maximum open positions at any time               |
+|Setting (DB key)                |Default   |Description                                      |
+|--------------------------------|----------|-------------------------------------------------|
+|`TRADING_MODE`                  |`dryrun`  |`paper` · `live` · `dryrun`                      |
+|`EOD_CLOSE_MINUTES`             |`15`      |Close all positions N minutes before market close|
+|`MARKET_OPEN_BUFFER_MINUTES`    |`5`       |Wait N minutes after open before new positions   |
 
 #### Position Sizing
 
-|Setting                   |Default    |Description                           |
-|--------------------------|-----------|--------------------------------------|
-|Sizing method             |`fixed_pct`|`kelly` · `fixed_pct` · `fixed_amount`|
-|Fixed percentage          |`2.0%`     |% of account per trade                |
-|Fixed amount              |`$1,000`   |Dollar amount per trade               |
-|Max capital per instrument|`10%`      |Hard cap per instrument               |
-|Max total exposure        |`50%`      |Hard cap on total deployed capital    |
+|Setting (DB key)          |Default      |Description                                |
+|--------------------------|-------------|-------------------------------------------|
+|`POSITION_SIZING_METHOD`  |`fixed_pct`  |`kelly` · `fixed_pct` · `fixed_amount`     |
+|`POSITION_SIZE_PCT`       |`2.0`        |% of portfolio per trade (when fixed_pct)  |
+|`POSITION_SIZE_AMOUNT`    |`5000.0`     |Dollar amount per trade (when fixed_amount)|
+|`POSITION_MAX_PCT`        |`5.0`        |Hard cap: max % in a single position       |
 
 #### Universe Selection
 
-|Setting                  |Default   |Description                               |
-|-------------------------|----------|------------------------------------------|
-|Selection mode           |`approval`|`autonomous` · `approval`                 |
-|Max instruments          |`20`      |Maximum instruments in active universe    |
-|Min average daily volume |`500,000` |Minimum volume filter                     |
-|Max pre-market gap       |`5%`      |Exclude instruments gapping more than this|
-|Exclude earnings day     |`true`    |Skip instruments reporting earnings today |
-|Exclude next-day earnings|`false`   |Skip instruments reporting after close    |
+|Setting (DB key)              |Default      |Description                            |
+|------------------------------|-------------|---------------------------------------|
+|`UNIVERSE_APPROVAL_MODE`      |`autonomous` |`autonomous` · `approval`              |
+|`UNIVERSE_MAX_SYMBOLS`        |`10`         |Watchlist size from daily scan         |
+|`UNIVERSE_MIN_AVG_VOLUME`     |`500000`     |Minimum 20-day average daily volume    |
+|`UNIVERSE_MIN_PRICE`          |`5.0`        |Minimum share price (USD)              |
+|`UNIVERSE_MAX_PRICE`          |`500.0`      |Maximum share price (USD)              |
 
 #### Signal & Model
 
-|Setting                     |Default   |Description                            |
-|----------------------------|----------|---------------------------------------|
-|LightGBM retraining interval|`weekly`  |`daily` · `weekly` · `monthly`         |
-|Training lookback           |`6 months`|Historical data window for retraining  |
-|Min training samples        |`5,000`   |Minimum samples required to retrain    |
-|A/B test days               |`5`       |Trading days to run parallel paper test|
-|Auto-promote model          |`false`   |Always require manual confirmation     |
+|Setting (DB key)          |Default |Description                                     |
+|--------------------------|--------|-------------------------------------------------|
+|`ML_FORWARD_BARS`         |`6`     |Bars ahead for forward-return label (6 = 30 min) |
+|`ML_LONG_THRESHOLD_PCT`   |`0.3`   |Min return % for long label                       |
+|`ML_SHORT_THRESHOLD_PCT`  |`0.3`   |Min drop % for short label                        |
+|`ML_MIN_PROBABILITY`      |`0.55`  |Min predicted probability to act on signal        |
 
 #### Risk & Circuit Breaker
 
-|Setting               |Default|Description                               |
-|----------------------|-------|------------------------------------------|
-|Max daily loss        |`5%`   |Halt trading if daily loss exceeds this   |
-|Max drawdown          |`15%`  |Halt trading if drawdown exceeds this     |
-|Reconnect max attempts|`10`   |Max IBKR reconnect attempts before halting|
-|Reconnect alert after |`3`    |Send alert after this many failed attempts|
+|Setting (DB key)                     |Default|Description                           |
+|-------------------------------------|-------|--------------------------------------|
+|`CIRCUIT_BREAKER_DAILY_LOSS_PCT`     |`3.0`  |Halt trading on daily loss %          |
+|`CIRCUIT_BREAKER_CONSECUTIVE_LOSSES` |`5`    |Halt after N consecutive losses       |
+|`STOP_LOSS_PCT`                      |`1.0`  |Default stop-loss % of entry price    |
+|`TAKE_PROFIT_PCT`                    |`2.0`  |Default take-profit % of entry price  |
 
 #### Orders
 
-|Setting            |Default |Description                              |
-|-------------------|--------|-----------------------------------------|
-|Limit order timeout|`60 sec`|Cancel or convert after this many seconds|
-|Timeout action     |`cancel`|`cancel` · `convert_to_market`           |
-
-#### Backtesting
-
-|Setting             |Default |Description                          |
-|--------------------|--------|-------------------------------------|
-|Commission per share|`$0.005`|IBKR Tiered rate, min $1.00 per order|
-|Slippage ticks      |`1`     |Assumed ticks of slippage on fills   |
-
-#### Logging
-
-|Setting        |Default  |Description                           |
-|---------------|---------|--------------------------------------|
-|Log level      |`DEBUG`  |`DEBUG` · `INFO` · `WARNING` · `ERROR`|
-|Log retention  |`90 days`|Auto-purge logs older than this       |
-|Log to database|`true`   |Write logs to MariaDB                 |
-|Log to file    |`true`   |Write logs to disk                    |
+|Setting (DB key)             |Default |Description                              |
+|-----------------------------|--------|-----------------------------------------|
+|`ORDER_FILL_TIMEOUT_SECONDS` |`60`    |Cancel or convert after this many seconds|
 
 #### Alerting & Webhooks
 
-|Setting            |Default         |Description                         |
-|-------------------|----------------|------------------------------------|
-|Alert email address|—               |Recipient for email notifications   |
-|SMTP host          |`smtp.gmail.com`|SMTP server                         |
-|SMTP port          |`587`           |SMTP port                           |
-|SMTP username      |—               |SMTP login                          |
-|Webhook enabled    |`false`         |Enable HTTP webhook notifications   |
-|Webhook endpoints  |—               |URL, events, and secret per endpoint|
+|Setting (DB key)           |Default         |Description                         |
+|---------------------------|----------------|------------------------------------|
+|`ALERTS_EMAIL_ENABLED`     |`false`         |Enable email alerts                 |
+|`ALERTS_EMAIL_FROM`        |—               |Sender address                      |
+|`ALERTS_EMAIL_TO`          |—               |Recipient address                   |
+|`ALERTS_SMTP_HOST`         |`smtp.gmail.com`|SMTP server                         |
+|`ALERTS_SMTP_PORT`         |`587`           |SMTP port                           |
+|`ALERTS_WEBHOOKS_ENABLED`  |`false`         |Enable HTTP webhook notifications   |
+|`ALERTS_WEBHOOK_URL`       |—               |HTTP endpoint for trade events      |
 
-#### Web & Security
-
-|Setting                     |Default  |Description                         |
-|----------------------------|---------|------------------------------------|
-|Session timeout             |`30 min` |Web session expiry after inactivity |
-|Rate limit — login          |`10/min` |Max login attempts per IP per minute|
-|Rate limit — other endpoints|`120/min`|General API rate limit per IP       |
-|News provider               |`alpaca` |`alpaca` · `finnhub`                |
+All 56 default settings are defined in `db/seed.py`. Run `python db/seed.py` to insert missing defaults after adding new settings.
 
 -----
 
 ## Data Sources
 
-### News & Sentiment
+### News & Sentiment *(not yet implemented)*
 
-The bot uses the **Alpaca News API** as the primary source for real-time news headlines and articles. **Finnhub** serves as a configurable fallback. Both providers are filtered to instruments in the active trading universe. Claude processes each news item and returns a sentiment score and plain-language summary that feeds into signal generation.
+> When implemented, the bot will use the **Alpaca News API** as the primary source for real-time news headlines and the **Finnhub API** as a configurable fallback. Claude will process each news item and return a sentiment score that feeds into signal generation. API keys for both services are configured in `.env`. See the [Development Status](#-development-status) section.
 
-To use Alpaca News, a free Alpaca Markets account is sufficient — no funded brokerage account is required. Sign up at [alpaca.markets](https://alpaca.markets).
+### Historical Data
 
-### Historical Data for Backtesting
-
-Backtesting uses **IBKR’s Historical Data API**, which provides intraday OHLCV data (1-minute and 5-minute bars) for US stocks and ETFs. This data is pulled on demand during a backtest run and cached locally in MariaDB to avoid repeated API calls for the same date range.
-
-IBKR imposes rate limits on historical data requests. The backtesting engine respects these limits automatically using a built-in request throttler.
-
-The same historical data pipeline is used to retrain the LightGBM model. By default the model is retrained weekly using the most recent 6 months of 5-minute bar data. The retrain schedule is configurable via the web interface under **Settings → Signal & Model**.
+The IBKR broker integration (`bot/core/broker.py`) fetches daily and intraday OHLCV bars via IBKR’s Historical Data API. Rate limiting (0.5s pause between requests) is built in to respect IBKR’s pacing limits (~60 requests per 10 minutes).
 
 -----
 
@@ -855,235 +781,85 @@ The hard caps apply regardless of the sizing method chosen. If Kelly produces a 
 
 ## Gap Protection
 
-Stocks with scheduled earnings announcements or analyst events during the session are flagged during universe selection. Instruments with a pre-market gap exceeding a configurable threshold are also filtered out, as extreme gaps reduce signal reliability and increase slippage risk.
-
-These thresholds are configurable via the web interface under **Settings → Universe Selection**.
-
-Flagged instruments are logged in `logs/universe.log` with the reason for exclusion and visible in the web interface universe scan results.
+Instruments with a pre-market gap exceeding `GAP_FILTER_MAX_PCT` (default 3%) are flagged during the signal pipeline. The gap filter setting is configurable via the web API. Flagged instruments are logged in `logs/universe.log`.
 
 -----
 
 ## Model Version Control
 
-Every time the LightGBM model is retrained, the new version is saved with a timestamp and performance metrics. Previous versions are never overwritten — they remain available for comparison and rollback.
-
-### Version Registry
-
-The web interface shows a table of all model versions:
-
-|Version|Trained on|Sharpe (backtest)|Win rate|Status  |
-|-------|----------|-----------------|--------|--------|
-|v12    |2025-03-24|1.42             |58.3%   |**Live**|
-|v11    |2025-03-17|1.38             |57.1%   |Archived|
-|v10    |2025-03-10|1.21             |55.8%   |Archived|
+Every time the LightGBM model is retrained, the new version is saved with a timestamp and performance metrics in `bot/ml/models/version.json`. Previous versions are never overwritten — they remain available for rollback.
 
 ### Rollback
 
-Rolling back to a previous version takes effect immediately for the next trading session:
+Rolling back to a previous version takes effect immediately:
 
 ```bash
 cd /opt/ibkr-trader
 source venv/bin/activate
-python -m bot.ml.versioning --rollback v11
+python -m bot.ml.versioning --rollback v20240324_120000
 ```
 
-Or via the web interface under Models → Version History → Activate.
+### List versions
 
------
-
-## A/B Model Testing
-
-Before promoting a newly trained model to live trading, it can be run in parallel in paper trading mode while the current live model continues to trade with real orders. Both models generate signals independently — only the live model’s signals result in actual orders.
-
-After a configurable number of trading days, the web interface shows a side-by-side performance comparison. You decide when and whether to promote the new model.
-
-These settings are configurable via the web interface under **Settings → Signal & Model**.
-
------
-
-## Audit Trail
-
-Every configuration change made via the web interface is recorded with the timestamp, the user who made the change, the field that was changed, and the old and new values.
-
-Example audit log entry:
-
-```
-2025-03-31 09:14:22 | user: admin | MAX_DAILY_LOSS_PCT: 5.0 → 3.0
-2025-03-31 09:15:01 | user: admin | UNIVERSE_MODE: approval → autonomous
-2025-03-31 11:02:44 | user: admin | TRADING_MODE: paper → live
+```bash
+python -m bot.ml.versioning --list
+python -m bot.ml.versioning --current
 ```
 
-The audit trail is stored in MariaDB and searchable in the web interface under Settings → Audit Log. It cannot be deleted via the web interface.
+### A/B Model Testing *(not yet implemented)*
 
------
-
-## Cost Dashboard
-
-The web interface includes a real-time cost dashboard tracking all operational expenses:
-
-|Cost type       |Source        |Tracked                                  |
-|----------------|--------------|-----------------------------------------|
-|IBKR commissions|Per trade fill|Per trade, daily, monthly                |
-|Claude API usage|Per API call  |Token count, cost, daily total           |
-|News API calls  |Per request   |Daily call count, within free tier or not|
-
-Net P&L (gross P&L minus all costs) is shown on the performance dashboard alongside gross P&L so you always see what you actually earned.
+> Shadow model testing (running a new model in parallel alongside the live model) is planned but not yet built.
 
 -----
 
 ## Dry Run Mode
 
-In dry run mode the full signal pipeline executes — universe selection, LightGBM predictions, 15-min confirmation, Claude reasoning, risk checks — but no orders are sent to IBKR. All decisions are logged and visible in the web interface exactly as in live or paper mode.
+In dry run mode the full signal pipeline executes — LightGBM predictions, 15-min confirmation, Claude reasoning, risk checks — but no orders are sent to IBKR. All decisions are logged exactly as in live or paper mode.
+
+Dry run is the default mode after installation. It uses a configurable watchlist (`DRYRUN_WATCHLIST` setting, default: `SPY,AAPL,MSFT,NVDA,TSLA`) instead of running the full universe scan. IBKR connection is optional in dryrun — when not connected, the bot logs that no data provider is available.
 
 Dry run is useful for:
 
-- Testing new code changes without needing an IBKR paper account
-- Verifying that a configuration change produces the expected behaviour
-- Demonstrating the bot’s decision-making without any capital at risk
+- Testing the signal pipeline without an IBKR paper account
+- Verifying configuration changes before switching to paper or live
+- Demonstrating the bot’s decision-making without capital at risk
 
-Enable via the web interface under **Settings → Trading** by switching Trading Mode to `dryrun`.
+Switch modes via the API:
+
+```bash
+curl -X PUT http://localhost:8000/api/settings/TRADING_MODE \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d ‘{"value": "paper"}’
+```
+
+The engine detects mode changes on the next tick (within 60 seconds) and handles broker connection/disconnection automatically — no service restart required.
 
 -----
 
-## Trade Export
+## Trade Export *(not yet implemented)*
 
-The full trade history can be exported directly from the web interface under Performance → Export. Available formats:
-
-|Format       |Contents                                                                        |
-|-------------|--------------------------------------------------------------------------------|
-|CSV          |All fields: timestamp, instrument, direction, entry, exit, P&L, Claude reasoning|
-|Excel (.xlsx)|Same as CSV with pre-formatted columns and a summary sheet                      |
-
-Exports can be filtered by date range, instrument, or trading mode (paper / live / dryrun) before downloading.
+> Trade export (CSV/Excel) from the web interface is planned but not yet built. Trade data is stored in the `trades` table and can be queried via SQL.
 
 -----
 
 ## Webhook Support
 
-In addition to email, the bot can send event notifications to any external system via HTTP webhooks. This allows integration with tools like Slack, Discord, custom dashboards, or any service that accepts POST requests.
+In addition to email, the bot can send event notifications to any external system via HTTP webhooks. Enable webhooks by setting `ALERTS_WEBHOOKS_ENABLED` to `true` and configuring `ALERTS_WEBHOOK_URL` via the API.
 
-Webhook endpoints are configured via the web interface under **Settings → Alerting & Webhooks**. Add one or more endpoints, select which events each should receive, and optionally set a secret for request verification.
-
-Each webhook payload is a JSON object containing the event type, timestamp, and relevant data. A `X-Webhook-Secret` header is included for verification on the receiving end.
+Each webhook payload is a JSON POST with the event type, timestamp, and relevant data. Supported events: `trade_opened`, `trade_closed`, `circuit_breaker`, `daily_summary`, `error`.
 
 -----
 
-## Position Sizing
+## Configuration Audit Trail *(not yet implemented)*
 
-Every trade is sized using one of three configurable strategies:
-
-|Strategy      |Description                                                      |
-|--------------|-----------------------------------------------------------------|
-|`fixed_pct`   |A fixed percentage of total account value per trade (e.g. 2%)    |
-|`fixed_amount`|A fixed dollar amount per trade (e.g. $1,000)                    |
-|`kelly`       |Kelly Criterion based on model confidence and historical win rate|
-
-All position sizing settings are configurable via the web interface under **Settings → Position Sizing**.
-The `max_position_pct` cap is enforced as a hard limit regardless of which sizing strategy is active — Claude cannot override it.
+> An audit trail for configuration changes is planned but not yet built. Currently, setting updates are logged via the standard logger (`web` category).
 
 -----
 
-## Gap Protection
+## Cost Dashboard *(not yet implemented)*
 
-Instruments with extreme expected opening gaps are a risk during universe selection. A 15% gap up on an earnings surprise can make a stock untradeable for intraday purposes. The gap protection filter runs as part of universe scanning:
-
-- Instruments with an absolute pre-market gap above a configurable threshold are automatically excluded from the active universe for that session
-- Instruments approaching earnings dates (within a configurable window) are flagged in the approval workflow and excluded in autonomous mode
-- All exclusions are logged in `logs/universe.log` with the reason
-
-```yaml
-universe:
-  max_gap_pct: 8.0              # Exclude instruments with gap > 8%
-  exclude_earnings_within_days: 2   # Exclude if earnings within 2 days
-```
-
------
-
-## Model Version Control
-
-Every time the LightGBM model is retrained, the new model is saved with a version number, timestamp, and performance metrics (accuracy, F1 score, backtest Sharpe ratio on the validation set). Previous versions are retained indefinitely.
-
-### Rollback
-
-If a newly deployed model underperforms, you can roll back to any previous version via the web interface under Models → Version History. The rollback takes effect at the start of the next trading session.
-
-### A/B Testing
-
-Before promoting a new model to production, run it in **shadow mode**: the new model generates predictions alongside the live model, but its signals are not acted upon. Performance is tracked in parallel for a configurable number of sessions. If the shadow model outperforms, promote it to live via the web interface.
-
-```yaml
-ml:
-  ab_test_sessions: 5           # Run shadow model for 5 sessions before promoting
-  promotion_threshold_sharpe: 0.1  # Shadow model must beat live by this margin
-```
-
------
-
-## Configuration Audit Trail
-
-Every change made via the web interface is recorded in the audit log:
-
-- **Who** — the logged-in user
-- **When** — timestamp with timezone
-- **What** — the exact setting that was changed, old value and new value
-- **Where** — the section of the configuration (risk, universe, intraday, etc.)
-
-The audit log is stored in MariaDB and visible in the web interface under Settings → Audit Trail. It is read-only and cannot be edited or deleted via the interface.
-
------
-
-## Cost Dashboard
-
-The web interface includes a real-time cost dashboard that tracks all operational expenses:
-
-|Cost type       |Source           |Tracked as                                     |
-|----------------|-----------------|-----------------------------------------------|
-|Claude API      |Anthropic billing|Cost per call, tokens used, daily/monthly total|
-|IBKR commissions|Trade fills      |Per trade, daily total, monthly total          |
-|News API        |Alpaca / Finnhub |Requests used vs. plan limit                   |
-
-The dashboard shows **gross P&L**, **total costs**, and **net P&L** side by side so you always know your actual return after expenses.
-
------
-
-## Dry Run Mode
-
-Dry run mode executes the full trading pipeline — universe selection, signal generation, risk checks, order sizing — but does not submit any orders to IBKR. This is useful for:
-
-- Testing new code without needing a paper trading account
-- Validating configuration changes before applying them live
-- Demonstrating the bot’s behaviour without financial exposure
-
-Enable dry run mode via the web interface under **Settings → Trading** by switching Trading Mode to `dryrun`.
-
-In dry run mode, all actions are logged and explained exactly as they would be in live mode. The only difference is that the final IBKR order submission step is skipped.
-
------
-
-## Trade Export
-
-Export your full trade history from the web interface under Performance → Export:
-
-- **CSV** — compatible with Excel, Google Sheets, and any data analysis tool
-- **Excel (.xlsx)** — formatted with summary statistics on a separate sheet
-
-Each exported row includes: date, instrument, direction, entry price, exit price, quantity, gross P&L, commission, net P&L, hold time, signal source, and Claude’s reasoning summary.
-
------
-
-## Webhook Support
-
-In addition to email, the bot can push events to any external system via HTTP webhooks. Configure webhook endpoints via the web interface under **Settings → Alerting & Webhooks**:
-
-```yaml
-alerts:
-  webhooks:
-    - url: https://your-system.com/ibkr-events
-      events: [trade_opened, trade_closed, circuit_breaker, connection_lost]
-      secret: your_webhook_secret    # HMAC-SHA256 signature for verification
-```
-
-Each webhook payload is a JSON object containing the event type, timestamp, and relevant data. The `secret` field enables the receiving system to verify that the request genuinely originated from the bot.
+> A cost dashboard tracking Claude API usage, IBKR commissions, and net P&L is planned but not yet built.
 
 -----
 
@@ -1095,50 +871,41 @@ This project is for **educational purposes only**. Trading financial instruments
 
 ## Development Status
 
-This project is currently in active development. The table below tracks which components have been built and what remains:
+This project is in active development. The core trading pipeline is complete; IBKR broker integration, web frontend, backtesting, and news/sentiment are not yet implemented.
 
 |Component                                                                    |Status     |
 |-----------------------------------------------------------------------------|-----------|
-|README & architecture                                                        |✅ Complete|
-|`CLAUDE.md` — Claude Code instructions                                       |✅ Complete|
-|`CONTRIBUTING.md`                                                            |✅ Complete|
-|`requirements.txt`                                                           |✅ Complete|
 |`deploy/setup.sh` — full Ubuntu server setup (15 steps, idempotent)         |✅ Complete|
 |`deploy/update.sh` — update from GitHub (SSH + HTTPS token support)         |✅ Complete|
 |`deploy/uninstall.sh` — interactive removal script                          |✅ Complete|
 |`deploy/systemd/` — systemd service units                                   |✅ Complete|
 |`db/` — SQLAlchemy models (LogEntry, Setting, Trade), migrations, seed      |✅ Complete|
-|`alembic.ini` — Alembic migration configuration                             |✅ Complete|
 |`bot/utils/logger.py` — disk-first async logging                            |✅ Complete|
 |`bot/utils/config.py` — MariaDB settings loader with TTL cache              |✅ Complete|
 |`bot/utils/calendar.py` — NYSE trading calendar                             |✅ Complete|
-|`bot/core/engine.py` — full trading loop (scan → signals → EOD close)       |✅ Complete|
+|`bot/core/engine.py` — trading loop with hot-reload mode switching          |✅ Complete|
+|`bot/core/broker.py` — IBKR connection via `ib_insync` (data + orders)      |✅ Complete|
 |`bot/universe/` — scanner + criteria scoring + Claude selector              |✅ Complete|
 |`bot/signals/indicators.py` — technical indicators via ta (5-min candles)   |✅ Complete|
 |`bot/signals/generator.py` — 15-min filter + Claude signal pipeline         |✅ Complete|
-|`bot/ml/features.py` — 24-feature engineering                               |✅ Complete|
-|`bot/ml/model.py` — thread-safe LightGBM singleton                         |✅ Complete|
-|`bot/ml/versioning.py` — model version manifest + rollback CLI              |✅ Complete|
-|`bot/ml/trainer.py` — training pipeline + forward-return labelling + CLI    |✅ Complete|
+|`bot/ml/` — LightGBM features, model, versioning, trainer                  |✅ Complete|
 |`bot/risk/manager.py` — circuit breaker + position sizing (fixed/Kelly)     |✅ Complete|
 |`bot/orders/executor.py` — IBKRBroker protocol + fill monitoring + fallback |✅ Complete|
 |`bot/orders/eod_close.py` — EOD close all positions + P&L calculation       |✅ Complete|
 |`bot/alerts/notifier.py` — email (SMTP/TLS) + HTTP webhook alerts           |✅ Complete|
-|`web/api/` — FastAPI skeleton (/health, /api/status, settings, logs, auth)  |✅ Complete|
+|`web/api/auth.py` — JWT authentication with rate limiting                   |✅ Complete|
+|`web/api/main.py` — 6 API endpoints (health, status, settings, logs, auth)  |✅ Complete|
 |HTTPS / Let’s Encrypt — provisioned by setup.sh                             |✅ Complete|
-|`tests/` — 421 tests (mocked IBKR, mocked Claude API, SQLite fixtures)      |✅ Complete|
-|`bot/core/watchdog.py` — IBKR reconnect logic & health monitoring           |🔲 To do   |
+|`tests/` — 255 tests (mocked IBKR, mocked Claude API, SQLite fixtures)      |✅ Complete|
+|`web/api/` — trade history, performance, portfolio API endpoints            |🔲 To do   |
 |`bot/backtesting/` — historical simulation engine                           |🔲 To do   |
-|`bot/risk/gap_filter.py` — earnings & pre-market gap protection             |🔲 To do   |
-|`bot/ml/ab_test.py` — A/B shadow model testing                             |🔲 To do   |
-|IBKR broker integration (`IBKRBroker` implementation via `ib_insync`)        |🔲 To do   |
-|`web/frontend/` — management dashboard                                      |🔲 To do   |
+|`bot/sentiment/` — news & sentiment analysis (Alpaca + Finnhub)             |🔲 To do   |
+|`web/frontend/` — React management dashboard                               |🔲 To do   |
 |`web/api/routes/audit.py` — configuration audit trail                       |🔲 To do   |
 |`web/api/routes/costs.py` — Claude API + commission cost dashboard          |🔲 To do   |
 |`web/api/routes/export.py` — trade export (CSV / Excel)                     |🔲 To do   |
-|API rate limiting on web endpoints                                           |🔲 To do   |
+|`bot/ml/ab_test.py` — A/B shadow model testing                             |🔲 To do   |
 |2FA (TOTP) for web interface                                                 |🔲 To do   |
-|Per-instrument & per-sector capital caps                                     |🔲 To do   |
 |Slippage & commission simulation in backtesting                              |🔲 To do   |
 
 -----
