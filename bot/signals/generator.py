@@ -32,7 +32,7 @@ from bot.utils.logger import get_logger
 log = get_logger("signals")
 log_claude = get_logger("claude")
 
-_MODEL = "claude-sonnet-4-6"
+_DEFAULT_MODEL = "claude-sonnet-4-6"
 _MAX_TOKENS = 512
 
 # ---------------------------------------------------------------------------
@@ -146,6 +146,8 @@ def generate(
     # ── LightGBM prediction ───────────────────────────────────────────────
     try:
         features = build(enriched)
+        if features.empty:
+            return _no_signal(symbol, "features_empty")
         X = features.iloc[[-1]]
         ml_label, ml_prob = predict(X)
     except Exception as exc:
@@ -216,8 +218,13 @@ def generate(
 
     prompt = _build_prompt(symbol, ml_label, ml_prob, snap, entry, target, stop)
     try:
+        from bot.utils.config import get as get_setting
+        model = get_setting("CLAUDE_MODEL", default=_DEFAULT_MODEL)
+    except Exception:
+        model = _DEFAULT_MODEL
+    try:
         response = client.messages.create(
-            model=_MODEL,
+            model=model,
             max_tokens=_MAX_TOKENS,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -282,6 +289,9 @@ def _confirm_15min(symbol: str, bars_5min: pd.DataFrame, ml_label: str) -> bool:
     except Exception as exc:
         log.warning("15-min indicator error", symbol=symbol, error=str(exc))
         return True  # default to confirmed on error
+
+    if enriched_15.empty:
+        return True  # insufficient data — default to confirmed
 
     last = enriched_15.iloc[-1]
     ema_cross = last.get("ema_cross", float("nan"))
@@ -353,6 +363,8 @@ def _atr_prices(
 
 def _indicator_snapshot(enriched: pd.DataFrame) -> dict:
     """Extract key indicator values from the last row."""
+    if enriched.empty:
+        return {}
     last = enriched.iloc[-1]
     cols = [
         "close", "open", "high", "low", "volume",

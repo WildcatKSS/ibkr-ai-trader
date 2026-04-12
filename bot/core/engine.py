@@ -65,6 +65,8 @@ class TradingEngine:
         broker_factory: Any | None = None,
     ) -> None:
         self._trading_mode = trading_mode
+        if tick_interval < 0:
+            raise ValueError(f"tick_interval must be >= 0, got {tick_interval}")
         self._tick_interval = tick_interval
         self._data_provider = data_provider
         self._broker_factory = broker_factory
