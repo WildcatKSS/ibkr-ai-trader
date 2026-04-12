@@ -10,7 +10,8 @@ Rules:
 from __future__ import annotations
 
 import threading
-from unittest.mock import MagicMock, call, patch
+from datetime import date
+from unittest.mock import ANY, MagicMock, call, patch
 
 import pytest
 
@@ -127,6 +128,7 @@ class TestTick:
             patch("bot.utils.calendar.is_market_open", return_value=market_open),
             patch("bot.utils.calendar.minutes_until_close", return_value=mins_left),
             patch("bot.utils.config.get", return_value=eod_minutes),
+            patch.object(e, "_scan_universe"),
             patch.object(e, "_run_signals") as mock_signals,
             patch.object(e, "_eod_close") as mock_eod,
         ):
@@ -166,6 +168,7 @@ class TestTick:
             patch("bot.utils.calendar.is_market_open", return_value=True),
             patch("bot.utils.calendar.minutes_until_close", return_value=10),
             patch("bot.utils.config.get", side_effect=ValueError("bad")),
+            patch.object(e, "_scan_universe"),
             patch.object(e, "_run_signals") as mock_signals,
             patch.object(e, "_eod_close") as mock_eod,
         ):
@@ -190,6 +193,159 @@ class TestRunSignals:
     def test_live_logs_stub(self):
         e = _make_engine("live")
         e._run_signals()  # stub — must not raise
+
+
+# ---------------------------------------------------------------------------
+# TradingEngine._scan_universe — dryrun watchlist
+# ---------------------------------------------------------------------------
+
+
+class TestScanUniverseDryrun:
+    def test_dryrun_uses_configured_watchlist(self):
+        """In dryrun mode with data_provider and DRYRUN_WATCHLIST, the
+        engine should populate the watchlist from config."""
+        mock_provider = MagicMock()
+        e = TradingEngine(trading_mode="dryrun", tick_interval=0, data_provider=mock_provider)
+        with patch("bot.utils.config.get", return_value="AAPL,MSFT,NVDA"):
+            e._scan_universe()
+        assert e._watchlist == ["AAPL", "MSFT", "NVDA"]
+
+    def test_dryrun_empty_watchlist(self):
+        """Empty DRYRUN_WATCHLIST → empty watchlist."""
+        mock_provider = MagicMock()
+        e = TradingEngine(trading_mode="dryrun", tick_interval=0, data_provider=mock_provider)
+        with patch("bot.utils.config.get", return_value=""):
+            e._scan_universe()
+        assert e._watchlist == []
+
+    def test_dryrun_no_data_provider(self):
+        """Without a data provider, watchlist stays empty even if setting is set."""
+        e = TradingEngine(trading_mode="dryrun", tick_interval=0, data_provider=None)
+        with patch("bot.utils.config.get", return_value="AAPL,MSFT"):
+            e._scan_universe()
+        assert e._watchlist == []
+
+    def test_dryrun_watchlist_trims_whitespace(self):
+        """Handles spaces in the comma-separated list."""
+        mock_provider = MagicMock()
+        e = TradingEngine(trading_mode="dryrun", tick_interval=0, data_provider=mock_provider)
+        with patch("bot.utils.config.get", return_value=" SPY , AAPL , "):
+            e._scan_universe()
+        assert e._watchlist == ["SPY", "AAPL"]
+
+
+# ---------------------------------------------------------------------------
+# TradingEngine._handle_mode_change — hot-reload via web UI
+# ---------------------------------------------------------------------------
+
+
+class TestHandleModeChange:
+    def test_dryrun_to_paper_connects_broker(self):
+        """Switching from dryrun to paper should connect a new broker."""
+        mock_broker = MagicMock()
+        factory = MagicMock(return_value=mock_broker)
+        e = TradingEngine(
+            trading_mode="dryrun", tick_interval=0, broker_factory=factory,
+        )
+        e._handle_mode_change("paper")
+
+        assert e._trading_mode == "paper"
+        factory.assert_called_once()
+        mock_broker.connect.assert_called_once()
+        assert e._data_provider is mock_broker
+        assert e._watchlist == []
+        assert e._last_scan_date is None
+
+    def test_paper_to_dryrun_closes_positions_and_disconnects(self):
+        """Switching from paper to dryrun should close positions and disconnect."""
+        mock_broker = MagicMock()
+        mock_broker.disconnect = MagicMock()
+        e = TradingEngine(
+            trading_mode="paper", tick_interval=0, data_provider=mock_broker,
+        )
+        with patch.object(e, "_eod_close") as mock_eod:
+            e._handle_mode_change("dryrun")
+
+        mock_eod.assert_called_once()
+        mock_broker.disconnect.assert_called_once()
+        assert e._trading_mode == "dryrun"
+
+    def test_paper_to_live_reconnects(self):
+        """Switching between paper and live should reconnect the broker."""
+        old_broker = MagicMock()
+        new_broker = MagicMock()
+        factory = MagicMock(return_value=new_broker)
+        e = TradingEngine(
+            trading_mode="paper", tick_interval=0,
+            data_provider=old_broker, broker_factory=factory,
+        )
+        with patch.object(e, "_eod_close"):
+            e._handle_mode_change("live")
+
+        old_broker.disconnect.assert_called_once()
+        factory.assert_called_once()
+        new_broker.connect.assert_called_once()
+        assert e._trading_mode == "live"
+        assert e._data_provider is new_broker
+
+    def test_broker_connect_failure_falls_back_to_dryrun(self):
+        """If broker connection fails during switch, fall back to dryrun."""
+        mock_broker = MagicMock()
+        mock_broker.connect.side_effect = ConnectionError("refused")
+        factory = MagicMock(return_value=mock_broker)
+        e = TradingEngine(
+            trading_mode="dryrun", tick_interval=0, broker_factory=factory,
+        )
+        e._handle_mode_change("paper")
+
+        assert e._trading_mode == "dryrun"  # fell back
+        assert e._data_provider is None
+
+    def test_no_broker_factory_stays_dryrun(self):
+        """Without a broker factory, cannot switch to paper/live."""
+        e = TradingEngine(trading_mode="dryrun", tick_interval=0)
+        e._handle_mode_change("paper")
+
+        assert e._trading_mode == "dryrun"  # couldn't switch
+        assert e._data_provider is None
+
+    def test_mode_change_resets_watchlist(self):
+        """After mode change, watchlist and scan date are reset."""
+        mock_broker = MagicMock()
+        factory = MagicMock(return_value=mock_broker)
+        e = TradingEngine(
+            trading_mode="dryrun", tick_interval=0, broker_factory=factory,
+        )
+        e._watchlist = ["AAPL", "MSFT"]
+        e._last_scan_date = date.today()
+
+        e._handle_mode_change("paper")
+        assert e._watchlist == []
+        assert e._last_scan_date is None
+
+    def test_tick_detects_mode_change(self):
+        """_tick should detect when TRADING_MODE differs and call _handle_mode_change."""
+        e = TradingEngine(trading_mode="dryrun", tick_interval=0)
+        with (
+            patch("bot.utils.config.get", return_value="paper"),
+            patch("bot.utils.calendar.is_trading_day", return_value=False),
+            patch.object(e, "_handle_mode_change") as mock_handle,
+            patch.object(e, "_scan_universe"),
+        ):
+            e._tick()
+        mock_handle.assert_called_once_with("paper")
+
+    def test_tick_same_mode_no_change(self):
+        """_tick should not call _handle_mode_change when mode hasn't changed."""
+        e = TradingEngine(trading_mode="dryrun", tick_interval=0)
+        with (
+            patch("bot.utils.config.get", return_value="dryrun"),
+            patch("bot.utils.calendar.is_trading_day", return_value=False),
+            patch.object(e, "_handle_mode_change") as mock_handle,
+            patch.object(e, "_scan_universe"),
+        ):
+            e._tick()
+        mock_handle.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -240,6 +396,7 @@ class TestMain:
             patch("bot.utils.config.get", return_value="dryrun"),
             patch("bot.core.engine.TradingEngine", return_value=mock_engine),
             patch("bot.utils.logger.shutdown"),
+            patch.dict("os.environ", {"IBKR_PORT": ""}, clear=False),
         ):
             from bot.core.__main__ import main
             main()  # must not raise or hang
@@ -261,10 +418,67 @@ class TestMain:
             patch("bot.utils.config.get", side_effect=get_side_effect),
             patch("bot.core.engine.TradingEngine", return_value=mock_engine),
             patch("bot.utils.logger.shutdown"),
+            patch.dict("os.environ", {"IBKR_PORT": ""}, clear=False),
         ):
             from bot.core.__main__ import main
             main()
         mock_engine.run.assert_called_once()
+
+    def test_dryrun_with_ibkr_port_connects(self):
+        """Dryrun mode with IBKR_PORT set attempts broker connection."""
+        request_shutdown()
+        mock_engine = MagicMock()
+        mock_broker = MagicMock()
+
+        with (
+            patch("bot.utils.config.get", return_value="dryrun"),
+            patch("bot.core.engine.TradingEngine", return_value=mock_engine) as MockTE,
+            patch("bot.utils.logger.shutdown"),
+            patch("bot.core.broker.IBKRConnection", return_value=mock_broker),
+            patch.dict("os.environ", {"IBKR_PORT": "7497"}, clear=False),
+        ):
+            from bot.core.__main__ import main
+            main()
+        mock_broker.connect.assert_called_once()
+        # Verify engine received the broker as data_provider and a factory.
+        call_kwargs = MockTE.call_args.kwargs
+        assert call_kwargs["trading_mode"] == "dryrun"
+        assert call_kwargs["data_provider"] is mock_broker
+        assert call_kwargs["broker_factory"] is not None
+
+    def test_dryrun_without_ibkr_port_no_broker(self):
+        """Dryrun mode without IBKR_PORT skips broker creation."""
+        request_shutdown()
+        mock_engine = MagicMock()
+
+        with (
+            patch("bot.utils.config.get", return_value="dryrun"),
+            patch("bot.core.engine.TradingEngine", return_value=mock_engine) as MockTE,
+            patch("bot.utils.logger.shutdown"),
+            patch.dict("os.environ", {"IBKR_PORT": ""}, clear=False),
+        ):
+            from bot.core.__main__ import main
+            main()
+        call_kwargs = MockTE.call_args.kwargs
+        assert call_kwargs["trading_mode"] == "dryrun"
+        assert call_kwargs["data_provider"] is None
+        assert call_kwargs["broker_factory"] is None
+
+    def test_paper_mode_requires_ibkr(self):
+        """Paper mode requires IBKR connection; failure aborts."""
+        mock_broker = MagicMock()
+        mock_broker.connect.side_effect = ConnectionError("refused")
+
+        with (
+            patch("bot.utils.config.get", return_value="paper"),
+            patch("bot.core.broker.IBKRConnection", return_value=mock_broker),
+            patch("bot.utils.logger.shutdown"),
+            patch.dict("os.environ", {"IBKR_PORT": "7497"}, clear=False),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            from bot.core.__main__ import main
+            main()
+        assert exc_info.value.code == 1
 
 
 # ---------------------------------------------------------------------------

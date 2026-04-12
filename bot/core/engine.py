@@ -49,6 +49,10 @@ class TradingEngine:
         Implementation of ``bot.universe.scanner.DataProvider`` used to fetch
         daily OHLCV bars for the universe scan.  If ``None``, the universe scan
         is skipped (dryrun mode or when the IBKR connection is not yet wired).
+    broker_factory:
+        Callable that returns a new ``IBKRConnection`` (or ``None``).  Used by
+        the hot-reload logic to create or tear down broker connections when
+        ``TRADING_MODE`` is changed via the web UI at runtime.
     """
 
     TICK_INTERVAL = 60  # seconds
@@ -58,10 +62,12 @@ class TradingEngine:
         trading_mode: str,
         tick_interval: int = TICK_INTERVAL,
         data_provider: Any | None = None,
+        broker_factory: Any | None = None,
     ) -> None:
         self._trading_mode = trading_mode
         self._tick_interval = tick_interval
         self._data_provider = data_provider
+        self._broker_factory = broker_factory
         self._last_scan_date: date | None = None
         self._watchlist: list[str] = []
 
@@ -103,6 +109,14 @@ class TradingEngine:
         """
         from bot.utils.calendar import is_market_open, is_trading_day, minutes_until_close
         from bot.utils.config import get
+
+        # ── Hot-reload: detect TRADING_MODE changes from web UI ──────────
+        try:
+            current_mode = get("TRADING_MODE", default="dryrun")
+            if current_mode in ("paper", "live", "dryrun") and current_mode != self._trading_mode:
+                self._handle_mode_change(current_mode)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Cannot read TRADING_MODE — keeping current", error=str(exc))
 
         now = datetime.now(tz=timezone.utc)
         today = now.date()
@@ -151,6 +165,76 @@ class TradingEngine:
         )
         self._run_signals()
 
+    def _handle_mode_change(self, new_mode: str) -> None:
+        """
+        React to a ``TRADING_MODE`` change made via the web UI.
+
+        Transitions:
+        - paper/live → dryrun: close open positions, disconnect broker.
+        - dryrun → paper/live: connect broker (requires IBKR running).
+        - paper ↔ live: close positions, reconnect broker (port may differ).
+
+        After any transition the watchlist is cleared so a fresh universe
+        scan runs on the next tick.
+        """
+        old_mode = self._trading_mode
+        log.info(
+            "Trading mode changed via web UI",
+            old_mode=old_mode,
+            new_mode=new_mode,
+        )
+
+        # Close positions if leaving a live-trading mode.
+        if old_mode in ("paper", "live"):
+            log.info("Closing open positions before mode switch")
+            self._eod_close()
+
+        # Tear down the existing broker connection.
+        if self._data_provider is not None and hasattr(self._data_provider, "disconnect"):
+            try:
+                self._data_provider.disconnect()
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Error disconnecting broker", error=str(exc))
+            self._data_provider = None
+
+        # Establish a new connection if the new mode needs one.
+        if new_mode in ("paper", "live"):
+            if self._broker_factory is not None:
+                try:
+                    broker = self._broker_factory()
+                    broker.connect()
+                    self._data_provider = broker
+                    log.info("Broker connected for new mode", mode=new_mode)
+                except Exception as exc:  # noqa: BLE001
+                    log.error(
+                        "Cannot connect broker for new mode — "
+                        "falling back to dryrun",
+                        mode=new_mode,
+                        error=str(exc),
+                    )
+                    new_mode = "dryrun"
+                    self._data_provider = None
+            else:
+                log.error(
+                    "No broker factory — cannot switch to paper/live, "
+                    "staying in dryrun",
+                )
+                new_mode = "dryrun"
+        elif new_mode == "dryrun" and self._broker_factory is not None:
+            # Optionally reconnect for data-only in dryrun.
+            try:
+                broker = self._broker_factory()
+                broker.connect()
+                self._data_provider = broker
+                log.info("Dryrun: broker connected for data only")
+            except Exception:  # noqa: BLE001
+                log.info("Dryrun: running without IBKR data")
+                self._data_provider = None
+
+        self._trading_mode = new_mode
+        self._watchlist = []
+        self._last_scan_date = None  # force a fresh universe scan
+
     def _scan_universe(self) -> None:
         """
         Run the daily universe scan to build today's watchlist.
@@ -159,14 +243,29 @@ class TradingEngine:
         When no DataProvider is available (IBKR not yet connected) a warning
         is logged and the scan is skipped.
         """
-        from bot.universe.scanner import get_pool, load_scan_config, scan
-        from bot.universe.selector import select
         from bot.utils.config import get
 
         if self._trading_mode == "dryrun":
-            log.info("Dryrun mode — universe scan skipped, watchlist stays empty")
-            self._watchlist = []
+            # In dryrun, use a static watchlist from config instead of the
+            # full universe scan.  This allows testing the signal pipeline
+            # end-to-end without needing to run the scanner.
+            raw = get("DRYRUN_WATCHLIST", default="")
+            symbols = [s.strip() for s in raw.split(",") if s.strip()]
+            if symbols and self._data_provider is not None:
+                self._watchlist = symbols
+                log.info(
+                    "Dryrun mode — using configured watchlist",
+                    watchlist=symbols,
+                )
+            else:
+                log.info(
+                    "Dryrun mode — no watchlist configured or no data provider",
+                )
+                self._watchlist = []
             return
+
+        from bot.universe.scanner import get_pool, load_scan_config, scan
+        from bot.universe.selector import select
 
         if self._data_provider is None:
             log.warning(
