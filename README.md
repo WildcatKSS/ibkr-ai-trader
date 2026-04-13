@@ -2,7 +2,7 @@
 
 An open-source intraday trading bot for Interactive Brokers, powered by Claude AI. Focused exclusively on **stocks and ETFs** — positions are opened and closed within the same trading day, with no overnight exposure.
 
-> ⚠️ **Work in progress** — The core trading pipeline is complete and tested: IBKR broker integration, universe selection, signal generation (LightGBM + 15-min filter + Claude), risk management (circuit breaker + position sizing), order execution (fill monitoring + market-order fallback), EOD close routine, and email/webhook alerting — with a **255-test suite**. The web frontend, backtesting engine, and news/sentiment module are not yet implemented. See the [Development Status](#-development-status) section for a full overview. **Contributions are welcome** — see [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
+**Contributions are welcome** — see [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
 
 -----
 
@@ -21,12 +21,12 @@ An open-source intraday trading bot for Interactive Brokers, powered by Claude A
 
 - **Universe selection** — Claude autonomously scans and selects the most promising stocks & ETFs for intraday trading, with configurable autonomous or human-approval mode
 - **AI-powered trading signals** — LightGBM generates intraday signals on 5-min candles, confirmed on 15-min timeframe, with Claude providing reasoning and context
-- **News & sentiment analysis** — Real-time news is processed by Claude to gauge market sentiment *(not yet implemented)*
+- **News & sentiment analysis** — Real-time news from Alpaca and Finnhub is scored for market sentiment and fed into the signal pipeline
 - **Explainability** — Every automated action, including universe selection, is explained in plain language by Claude and logged
 
 ### Risk & safety
 
-- **Risk management** — Claude advises on position sizing, stop-losses, and portfolio exposure
+- **Risk management** — Programmatic risk checks before every order: daily loss limit, consecutive loss limit, and position size caps
 - **Position sizing model** — Configurable capital allocation per trade using fixed percentage, fixed amount, or Kelly Criterion with hard per-instrument capital limits
 - **Circuit breaker** — Automatically halts trading when drawdown or loss thresholds are exceeded
 - **Gap protection** — Instruments with extreme expected opening gaps are flagged or excluded during universe selection
@@ -34,20 +34,21 @@ An open-source intraday trading bot for Interactive Brokers, powered by Claude A
 
 ### Model & backtesting
 
-- **Backtesting** — Test strategies against historical market data before going live *(not yet implemented)*
+- **Backtesting** — Test strategies against historical market data before going live, with Sharpe ratio, max drawdown, win rate, and equity curve
 - **Model version control** — Every LightGBM retrain is versioned and stored; roll back to any previous model via CLI
 - **A/B model testing** — Run a new model version in paper trading alongside the live model before promoting it to production *(not yet implemented)*
 
 ### Monitoring & interface
 
-- **Performance dashboard** — P&L charts, Sharpe ratio, win rate, max drawdown, and more *(not yet implemented)*
+- **Performance dashboard** — P&L charts, Sharpe ratio, win rate, max drawdown, and more via the React web interface
 - **Cost dashboard** — Real-time overview of Claude API costs, IBKR commissions, and net P&L after all costs *(not yet implemented)*
 - **Comprehensive logging** — DEBUG-level logs across all categories, written to disk and MariaDB
 - **Alerting** — Real-time notifications via email on critical events
 - **Webhook support** — Push events to any external system via configurable HTTP webhooks
 - **Trade export** — Download full trade history as CSV or Excel from the web interface *(not yet implemented)*
 - **Configuration audit trail** — Every change made via the web interface is logged with timestamp and user *(not yet implemented)*
-- **Web API** — Settings and configuration managed via REST API; web frontend not yet built
+- **Web dashboard** — React management interface with login, dashboard, trade history, performance charts, settings, and backtesting UI
+- **Web API** — 12 REST API endpoints for status, settings, trades, performance, portfolio, logs, and backtesting
 - **Security** — HTTPS via Let’s Encrypt, JWT authentication with rate limiting
 
 -----
@@ -58,19 +59,18 @@ An open-source intraday trading bot for Interactive Brokers, powered by Claude A
 ┌──────────────────────────────────────────────────────────────┐
 │                        Ubuntu Server                         │
 │                                                              │
-│   Browser ──► Nginx (reverse proxy) ──► FastAPI (backend)    │
+│   Browser ──► Nginx ──► React (static) + FastAPI (API)       │
 │                                              │               │
 │                          ┌───────────────────┤               │
 │                          ▼                   ▼               │
 │                     MariaDB            Python Bot Core       │
 │                   (trades, logs,             │               │
-│                    config, users)    ┌───────┴────────┐      │
-│                                      ▼                ▼      │
-│                               IBKR API          Claude API   │
-│                             (TWS / IB GW)    (universe,      │
-│                                               signals, risk, │
-│                                               sentiment,     │
-│                                               execution)     │
+│                    config)          ┌────────┼────────┐      │
+│                                     ▼        ▼        ▼      │
+│                              IBKR API   Claude API   News    │
+│                            (TWS/IB GW) (universe,   APIs     │
+│                                         signals)   (Alpaca,  │
+│                                                    Finnhub)  │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -90,6 +90,8 @@ An open-source intraday trading bot for Interactive Brokers, powered by Claude A
 |Signal model        |LightGBM (5-min candles, locally hosted)                |
 |Technical indicators|ta                                                      |
 |Historical data     |IBKR Historical Data API (backtesting)                  |
+|Frontend            |React 18 + TypeScript + Tailwind CSS + Vite             |
+|Charts              |Recharts (equity curves, P&L)                           |
 |Process mgmt        |systemd                                                 |
 
 -----
@@ -123,8 +125,14 @@ ibkr-ai-trader/
 │   │   └── eod_close.py            # End-of-day close all positions
 │   ├── alerts/
 │   │   └── notifier.py             # Email (SMTP/TLS) + HTTP webhook alerts
-│   ├── backtesting/                # Historical simulation engine (not yet implemented)
-│   ├── sentiment/                  # News & sentiment analysis (not yet implemented)
+│   ├── backtesting/
+│   │   ├── engine.py               # Historical bar replay with simulated execution
+│   │   ├── metrics.py              # Sharpe, drawdown, win rate, profit factor
+│   │   └── results.py              # Result dataclass and JSON serialisation
+│   ├── sentiment/
+│   │   ├── alpaca.py               # Alpaca News API v2 client (primary)
+│   │   ├── finnhub.py              # Finnhub company news client (fallback)
+│   │   └── scorer.py               # Keyword sentiment scoring with recency weighting
 │   └── utils/
 │       ├── __init__.py
 │       ├── logger.py               # Disk-first, async MariaDB flush logger
@@ -133,9 +141,13 @@ ibkr-ai-trader/
 ├── web/
 │   ├── api/
 │   │   ├── __init__.py
-│   │   ├── main.py                 # FastAPI app (health, status, settings, logs endpoints)
+│   │   ├── main.py                 # FastAPI app (12 endpoints: health, status, settings, logs, trades, performance, portfolio, backtesting)
 │   │   └── auth.py                 # JWT authentication + rate limiting
-│   └── frontend/                   # React dashboard (not yet implemented)
+│   └── frontend/
+│       └── src/
+│           ├── App.tsx             # Root router (HashRouter with auth guard)
+│           ├── api.ts              # Typed API client with token management
+│           └── components/         # Login, Dashboard, TradeHistory, Performance, Settings, Backtesting, Layout
 ├── db/
 │   ├── models.py                   # SQLAlchemy ORM models (MariaDB)
 │   ├── migrations/                 # Alembic database migrations
@@ -268,6 +280,7 @@ ALPACA_API_KEY=your_alpaca_api_key
 ALPACA_API_SECRET=your_alpaca_api_secret
 FINNHUB_API_KEY=your_finnhub_api_key
 SMTP_PASSWORD=your_smtp_password
+WEB_PASSWORD=your_dashboard_password
 ```
 
 All operational settings (trading mode, risk parameters, universe selection, position sizing, etc.) are configured via the web interface after first login. The `.env` file is only for secrets and connection details.
@@ -349,9 +362,9 @@ This bot is designed exclusively for **intraday trading of US stocks and ETFs**.
 ### Trading Day Lifecycle
 
 ```
-09:15 ET  Universe scan        Claude scores and selects instruments for the day
-09:30 ET  Market open          Bot begins monitoring and generating intraday signals
-09:30–15:45  Active trading    Claude enters and exits positions throughout the session
+09:15 ET  Universe scan        Scanner scores candidates; Claude selects instruments
+09:30 ET  Market open          Bot begins generating intraday signals (LightGBM + Claude)
+09:35+    Active trading       Signals → risk check → order execution (configurable buffer)
 15:45 ET  EOD close routine    All remaining open positions are closed (configurable offset)
 16:00 ET  Market close         Bot enters idle state until the next trading day
 ```
@@ -360,118 +373,122 @@ This bot is designed exclusively for **intraday trading of US stocks and ETFs**.
 
 The signal pipeline uses two layers:
 
-**LightGBM model (primary signal — 5-min candles):**
+**LightGBM model (primary signal — 24 features on 5-min candles):**
 
-- VWAP deviation — distance of price from the daily VWAP
-- Volume ratio — current volume vs. average volume at this time of day
-- RSI (14 periods on 5-min bars)
-- MACD histogram value
-- ATR as volatility measure
-- Gap percentage vs. previous close
-- Time of day — first hour and last 30 minutes behave differently
-- Sector momentum — is the sector outperforming or underperforming today
+- Momentum: RSI, Stochastic %K/%D, MACD histogram
+- Trend: ADX (+DI/−DI), EMA 9/21 cross
+- Volatility: Bollinger %B, band width, squeeze detection, ATR %
+- Volume: Money Flow Index, OBV slope, volume ratio
+- Price-relative: close vs. EMA9, close vs. EMA21, close vs. VWAP
+- Candle structure: body ratio, upper/lower wick ratios
+- Short-term returns: 1-bar, 3-bar, 6-bar log returns
 
 **15-min confirmation filter:**
 
-- Trend direction on 15-min candles must agree with the 5-min signal before a trade is executed
+- EMA cross and MACD histogram direction on the 15-min timeframe must agree with the 5-min signal
+
+**Sentiment score:**
+
+- Aggregated news sentiment from Alpaca / Finnhub (-1.0 bearish to +1.0 bullish)
 
 **Claude (context & final decision):**
 
-- Real-time news headlines and sentiment scores
-- Broader market conditions
-- Portfolio context and risk state
+- Evaluates the ML signal, 15-min confirmation, and sentiment score
+- Decides whether to act on the signal, and sets entry/target/stop prices
+- Provides a plain-language explanation for every decision
 
 ### End-of-Day Close Routine
 
-`EOD_CLOSE_MINUTES` before market close (default: 15 minutes), all open orders are cancelled, remaining positions are closed at market price, and a daily summary is sent by email. See [step 9 in How Claude Is Used](#9--end-of-day-close-routine) for full detail.
+`EOD_CLOSE_MINUTES` before market close (default: 15 minutes), all remaining positions are closed at market price and a daily summary is sent by email.
 
 -----
 
 ## How Claude Is Used
 
-Every automated action taken by the bot is driven by Claude. Nothing happens silently — each decision is reasoned, logged, and explained in plain language in the web interface.
+Claude is called at two specific points in the pipeline: **universe selection** (once per trading day) and **signal confirmation** (once per actionable signal). All other steps — indicator calculation, ML prediction, risk management, order execution, position closing — are fully programmatic and run without Claude.
 
-Every action listed below produces a plain-language explanation that is stored in MariaDB and visible in the web interface. The goal is full auditability: at any point you can open the log viewer and understand exactly what the bot did, why it did it, and what data it was looking at at that moment.
+Every Claude call produces a plain-language explanation that is stored in MariaDB and visible in the web interface.
 
 -----
 
 ### 1 · Universe Selection
 
-At the start of each trading day, Claude scans all tradeable US stocks and ETFs available via IBKR. For each instrument it evaluates pre-market volume, gap percentage, average true range (ATR), recent price action, sector momentum, and news activity. Claude assigns a score from 0 to 100 and selects the top instruments for that session.
+At the start of each trading day, the **scanner** fetches daily OHLCV bars for all symbols in the configurable `UNIVERSE_POOL` via IBKR. The **criteria scorer** evaluates each symbol against 12 bullish criteria (7 core + 5 bonus, scoring 0-100): price vs. moving averages, trend structure, volume, candle quality, and breakout proximity.
 
-**Explained in the web interface:** which instruments were selected, why each one scored high, which were rejected and why, and what the key metrics were at the time of selection. In approval mode, the full reasoning is shown before you confirm or reject each suggestion.
+The scored and ranked list is then passed to **Claude**, which makes the final selection. Claude considers the criteria scores, recent price action, and market context to pick the best instruments for the session.
+
+**Explained in the web interface:** which instruments were selected, why each one scored high, which were rejected and why. In approval mode, the full reasoning is shown before you confirm or reject each suggestion.
 
 -----
 
 ### 2 · Signal Generation
 
-Signals are generated by a **LightGBM model** running locally on the server. Every 5 minutes it evaluates a feature vector built from ta indicators (VWAP deviation, volume ratio, RSI, MACD histogram, ATR, gap %, sector momentum, time of day) and outputs a directional prediction: long, short, or no trade. A **15-minute candle confirmation** check then filters out signals that run counter to the broader intraday trend — only signals where both timeframes agree are passed forward.
+Signals are generated by a **LightGBM model** running locally on the server. It evaluates a 24-feature vector built from `ta` indicators (RSI, Stochastic, MACD, ADX, Bollinger Bands, ATR, MFI, OBV, EMA cross, VWAP deviation, candle structure, short-term returns) and outputs a directional prediction: long, short, or no trade. A **15-minute candle confirmation** check then filters out signals where the EMA cross and MACD direction on the 15-min timeframe disagree with the 5-min signal.
 
-Once a signal clears both checks, it is handed to **Claude**, which evaluates market context, adds sentiment data, and decides whether to act on it. Claude also determines the entry price, price target, and stop-loss level.
+The **sentiment module** fetches recent news from Alpaca/Finnhub and computes a score (-1.0 to +1.0). This score, together with the ML prediction and 15-min confirmation, is passed to **Claude** for the final decision. Claude evaluates market context, decides whether to act, and sets the entry price, target, and stop-loss.
 
-**Explained in the web interface:** the LightGBM feature values that produced the signal, the 15-min confirmation result, Claude’s contextual assessment, and the full reasoning behind the final decision.
+**Explained in the web interface:** the LightGBM prediction, the 15-min confirmation result, sentiment score, Claude’s assessment, and the full reasoning behind the final decision.
 
 -----
 
 ### 3 · Order Execution
 
-When a signal is confirmed, Claude decides the exact order type (market, limit, or stop-limit), the entry timing, and the initial position size. The bot then places the order via the IBKR API without human intervention.
+When a signal is confirmed, the **risk manager** computes the position size (fixed %, fixed amount, or Kelly Criterion) and validates it against the circuit breaker and hard caps. The **executor** places a limit order at the entry price via the IBKR API. If the limit order is not filled within the configurable timeout, it is cancelled and retried as a market order.
 
-**Explained in the web interface:** why a specific order type was chosen, what entry timing logic was applied, and what Claude expected to happen after entry.
-
------
-
-### 4 · Position Management
-
-After a position is opened, Claude monitors it in real time. It decides whether to move a stop-loss to break-even, scale out of a partial position, hold through temporary pullbacks, or exit early if conditions deteriorate.
-
-**Explained in the web interface:** every adjustment to an open position is logged with Claude’s reasoning — why the stop was moved, why a partial exit was taken, or why Claude chose to hold.
+All trades — including dryrun — are persisted to the `trades` table with full provenance: ML label, probability, 15-min confirmation status, and Claude's explanation.
 
 -----
 
-### 5 · Trade Exit
+### 4 · Position Exit
 
-Claude determines when to close a position based on price target reached, stop-loss hit, signal reversal, or deteriorating momentum. It chooses the appropriate exit order type and size.
+Open positions are exited in one of three ways:
 
-**Explained in the web interface:** the reason for the exit (target hit, stop, reversal, or manual override), the final P&L, and a post-trade evaluation from Claude on whether the trade played out as expected.
+- **Target hit** — price reaches the take-profit level set by Claude at entry
+- **Stop hit** — price reaches the stop-loss level set by Claude at entry
+- **EOD close** — all remaining positions are closed at market price before market close (configurable via `EOD_CLOSE_MINUTES`)
 
------
-
-### 6 · Sentiment Analysis *(not yet implemented)*
-
-> This module is planned but not yet built. When implemented, news headlines and articles for all instruments in the active universe will be passed to Claude for sentiment scoring. See the [Development Status](#-development-status) section.
+All exit events, fill prices, and P&L are logged in `logs/trading.log` and persisted to the `trades` table.
 
 -----
 
-### 7 · Risk Management
+### 5 · Sentiment Analysis
 
-Before every order is placed, Claude performs a risk check on the current portfolio state. It evaluates open exposure, correlation between positions, available buying power, and whether the new trade fits within the configured risk parameters (max positions, max daily loss, max drawdown).
-
-**Explained in the web interface:** the outcome of each risk check — approved or blocked — with a full breakdown of the factors Claude weighed and the current portfolio risk metrics at that moment.
+Before Claude makes its final trading decision, the bot fetches recent news articles for the instrument from the **Alpaca News API** (primary) and **Finnhub** (fallback). Each article is scored using keyword-based sentiment analysis weighted by recency (newer articles have more influence, with a half-life of ~6 hours). The aggregated sentiment score (-1.0 bearish to +1.0 bullish) is included in the Claude prompt as additional context.
 
 -----
 
-### 8 · Circuit Breaker
+### 6 · Risk Management
 
-If the daily loss limit or maximum drawdown threshold is breached, Claude triggers the circuit breaker. It cancels all open orders, closes all remaining positions, and halts trading for the rest of the session.
+Before every order is placed, the **risk manager** (`bot/risk/manager.py`) performs a programmatic check:
 
-**Explained in the web interface:** the exact threshold that was breached, the portfolio state at the moment of the trigger, which orders were cancelled, which positions were closed and at what prices, and what the final session P&L was.
+1. **Circuit breaker** — has the daily loss limit or consecutive loss limit been hit?
+2. **Position sizing** — compute share count from the configured method (fixed %, fixed amount, or half-Kelly)
+3. **Hard cap** — ensure the position does not exceed `POSITION_MAX_PCT` of portfolio value
 
------
-
-### 9 · End-of-Day Close Routine
-
-Fifteen minutes before market close (configurable), Claude initiates the EOD close routine regardless of position P&L. All remaining open positions are closed at market price via IBKR to ensure zero overnight exposure.
-
-**Explained in the web interface:** which positions were closed as part of EOD, the prices achieved, the final session P&L summary, and whether any positions required special handling.
+If any check fails, the order is blocked and the reason is logged. Risk management does not call Claude — it is entirely rule-based.
 
 -----
 
-### 10 · Daily Summary
+### 7 · Circuit Breaker
 
-After the EOD close, Claude generates a plain-language summary of the full trading day: instruments traded, total P&L, win rate, best and worst trade, risk events, and observations about market conditions. This summary is sent via email and is available in the web interface.
+The circuit breaker is checked by the risk manager before every order. It trips when:
 
-**Explained in the web interface:** the complete daily summary including all trades, Claude’s overall assessment of the session, and what to monitor the following day.
+- **Daily loss** exceeds `CIRCUIT_BREAKER_DAILY_LOSS_PCT` of portfolio value
+- **Consecutive losing trades** reach `CIRCUIT_BREAKER_CONSECUTIVE_LOSSES`
+
+When tripped, all subsequent orders are blocked for the rest of the session. An email/webhook alert is sent via the notifier. The circuit breaker is fully programmatic — Claude is not involved.
+
+-----
+
+### 8 · End-of-Day Close Routine
+
+`EOD_CLOSE_MINUTES` before market close (default: 15 minutes), the engine triggers the EOD close routine. All remaining open positions are closed at market price via IBKR to ensure zero overnight exposure. The routine runs programmatically — Claude is not called. An alert is sent if any position fails to close.
+
+-----
+
+### 9 · Daily Summary
+
+After the EOD close, the notifier sends a daily summary via email and/or webhook containing: trade count, wins, losses, and total P&L for the session.
 
 -----
 
@@ -532,52 +549,75 @@ All fill events, timeouts, and cancellations are logged in `logs/trading.log` an
 
 ## Circuit Breaker
 
-The circuit breaker protects your capital by automatically halting all trading activity when configurable thresholds are breached:
+The circuit breaker protects your capital by automatically blocking all new orders when configurable thresholds are breached:
 
-- **Daily loss limit** — stops trading if losses exceed a set percentage of account value in one day
-- **Max drawdown** — halts the bot if the portfolio drops beyond a defined peak-to-trough threshold
-- **Manual override** — the web interface allows you to manually pause or resume trading at any time
+- **Daily loss limit** (`CIRCUIT_BREAKER_DAILY_LOSS_PCT`) — blocks trading if losses exceed a set percentage of portfolio value in one day
+- **Consecutive losses** (`CIRCUIT_BREAKER_CONSECUTIVE_LOSSES`) — blocks trading after N consecutive losing trades in a row
 
-When the circuit breaker trips, all open orders are cancelled, a notification is sent, and the bot enters a safe idle state until manually reset.
+When the circuit breaker trips, a notification is sent (email and/or webhook) and no new orders are placed for the rest of the session. The EOD close routine still runs to close any remaining open positions.
 
 -----
 
 ## Alerting
 
-The bot sends real-time email notifications for critical events:
+The bot sends real-time notifications via email and/or HTTP webhook for the following events:
 
-|Event                    |Severity|
-|-------------------------|--------|
-|Trade opened / closed    |Info    |
-|Circuit breaker triggered|Critical|
-|IBKR connection lost     |Critical|
-|Claude API error         |Warning |
-|Reconnect attempt failed |Warning |
-|Daily P&L summary        |Info    |
-|Backtest completed       |Info    |
-|Model retrained          |Info    |
-|Model rollback           |Warning |
-|Model version promoted   |Info    |
-|Configuration changed    |Info    |
+|Event               |Type             |Content                                                |
+|--------------------|-----------------|-------------------------------------------------------|
+|`trade_opened`      |Info             |Symbol, action, shares, fill price, target, stop       |
+|`trade_closed`      |Info             |Symbol, exit price, P&L                                |
+|`circuit_breaker`   |Critical         |Reason the circuit breaker tripped                     |
+|`daily_summary`     |Info             |Trade count, wins, losses, total P&L                   |
+|`error`             |Error            |Unhandled error details and context                    |
 
 -----
 
-## Backtesting *(not yet implemented)*
+## Backtesting
 
-> The backtesting engine is planned but not yet built. When implemented, it will reuse the existing signal pipeline (indicators, LightGBM, risk manager) to replay historical data and calculate performance metrics (Sharpe ratio, max drawdown, win rate). See the [Development Status](#-development-status) section.
+The backtesting engine (`bot/backtesting/`) replays historical OHLCV data through the existing signal pipeline (indicators, LightGBM, 15-min confirmation) with simulated order execution. Claude API calls are skipped to keep backtests fast and reproducible.
+
+### How it works
+
+1. Pre-compute technical indicators and ML features on the full dataset
+2. For each bar after warmup (60 bars), get a LightGBM prediction
+3. Check 15-min confirmation (EMA cross + MACD direction)
+4. If confirmed, open a simulated position with ATR-based stop/target
+5. Monitor stop-loss and take-profit on each subsequent bar
+6. Close any remaining position at the end of the dataset
+
+### Metrics
+
+The engine computes: total return, total P&L, trade count, win rate, average win/loss, profit factor, max drawdown, Sharpe ratio, largest win/loss.
+
+### Usage
+
+**Via CLI:**
+```bash
+python -m bot.backtesting.engine --symbol AAPL --data historical.csv --capital 100000
+```
+
+**Via API:**
+```bash
+curl -X POST http://localhost:8000/api/backtesting/run \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"symbol": "AAPL", "initial_capital": 100000, "position_size_pct": 2.0}'
+```
+
+**Via web interface:** the Backtesting page lets you configure parameters, run a backtest, and view the equity curve chart and trade log.
 
 -----
 
 ## Universe Selection
 
-Claude autonomously decides which stocks and ETFs are most suitable for intraday trading that day, removing the need to maintain a manual watchlist.
+The bot automatically selects the best instruments for intraday trading each day, removing the need to maintain a manual watchlist.
 
 ### How It Works
 
-1. **Scan** — At market open, the scanner queries IBKR for all tradeable US stocks and ETFs and pulls intraday-relevant metrics: pre-market volume, gap %, volatility, sector momentum, and average true range (ATR).
-1. **Score** — Claude evaluates each instrument and assigns an intraday score based on: opening gap, pre-market volume spike, news catalysts, ATR, and sector trend.
-1. **Select** — The top-ranked instruments are added to the active intraday universe for that session.
-1. **Trade** — Intraday signals are generated and orders placed. All positions are automatically closed 15 minutes before market close.
+1. **Scan** — Before market open, the scanner fetches daily OHLCV bars for all symbols in `UNIVERSE_POOL` (configurable list of ~50 US stocks and ETFs) via IBKR.
+1. **Score** — The criteria scorer evaluates each symbol against 12 bullish criteria (7 core + 5 bonus, scoring 0-100): price above moving averages, trend structure, higher highs/lows, volume patterns, candle quality, and breakout proximity.
+1. **Select** — Claude reviews the scored list and makes the final selection, considering criteria scores, recent price action, and market context.
+1. **Trade** — Intraday signals are generated and orders placed. All positions are automatically closed before market close.
 
 ### Selection Modes
 
@@ -602,9 +642,18 @@ Approved instruments enter the active trading universe immediately. Rejected one
 
 -----
 
-## Performance Dashboard *(not yet implemented)*
+## Web Dashboard
 
-> The web frontend and performance dashboard are planned but not yet built. When implemented, the dashboard will show P&L charts, win rate, Sharpe ratio, max drawdown, trade log, and open positions. See the [Development Status](#-development-status) section.
+The React management interface (Vite + TypeScript + Tailwind CSS) provides:
+
+- **Login** — JWT authentication with sessionStorage token
+- **Dashboard** — Trading mode, market status, daily P&L, trade count, open positions
+- **Trade History** — Paginated trade log with symbol and status filters
+- **Performance** — Period filters (1d/7d/30d/all), metrics cards, cumulative P&L chart (Recharts)
+- **Settings** — Inline editing of all operational settings
+- **Backtesting** — Parameter form, equity curve chart, trade log table
+
+The frontend is built to `web/frontend/static/` and served by Nginx. The API proxy routes `/api/*` to the FastAPI backend on port 8000.
 
 -----
 
@@ -672,6 +721,7 @@ After `setup.sh` runs, fill in only your external API keys and passwords. Everyt
 |`ALPACA_API_SECRET`|You     |Alpaca News API secret                                                 |
 |`FINNHUB_API_KEY`  |You     |Finnhub API key (fallback news provider)                               |
 |`SMTP_PASSWORD`    |You     |SMTP password or app password for email alerts                         |
+|`WEB_PASSWORD`     |You     |Admin password for the web dashboard login (JWT-authenticated)         |
 |`DB_PASSWORD`      |setup.sh|Generated automatically                                                |
 |`SECRET_KEY`       |setup.sh|Session signing key; generated automatically                           |
 |`DOMAIN`           |setup.sh|Your domain name; entered during setup for Certbot                     |
@@ -745,15 +795,15 @@ Every setting below is managed via **Settings** in the web interface. Changes ta
 |`ALERTS_WEBHOOKS_ENABLED`  |`false`         |Enable HTTP webhook notifications   |
 |`ALERTS_WEBHOOK_URL`       |—               |HTTP endpoint for trade events      |
 
-All 56 default settings are defined in `db/seed.py`. Run `python db/seed.py` to insert missing defaults after adding new settings.
+All 42 default settings are defined in `db/seed.py`. Run `python db/seed.py` to insert missing defaults after adding new settings.
 
 -----
 
 ## Data Sources
 
-### News & Sentiment *(not yet implemented)*
+### News & Sentiment
 
-> When implemented, the bot will use the **Alpaca News API** as the primary source for real-time news headlines and the **Finnhub API** as a configurable fallback. Claude will process each news item and return a sentiment score that feeds into signal generation. API keys for both services are configured in `.env`. See the [Development Status](#-development-status) section.
+The bot uses the **Alpaca News API v2** as the primary source for recent news articles (last 24 hours) and the **Finnhub company news API** as a fallback. Articles are scored using keyword-based sentiment analysis with recency weighting. The aggregated score (-1.0 to +1.0) is included in the Claude prompt for the final trading decision. API keys for both services are configured in `.env`.
 
 ### Historical Data
 
@@ -824,7 +874,7 @@ Dry run is useful for:
 - Verifying configuration changes before switching to paper or live
 - Demonstrating the bot’s decision-making without capital at risk
 
-Switch modes via the API:
+Switch modes via the web dashboard under **Settings**, or via the API:
 
 ```bash
 curl -X PUT http://localhost:8000/api/settings/TRADING_MODE \
@@ -866,47 +916,6 @@ Each webhook payload is a JSON POST with the event type, timestamp, and relevant
 ## Disclaimer
 
 This project is for **educational purposes only**. Trading financial instruments involves significant risk of loss. The authors are not responsible for any financial losses incurred through the use of this software. Always test thoroughly on a paper trading account before going live.
-
------
-
-## Development Status
-
-This project is in active development. The core trading pipeline is complete; IBKR broker integration, web frontend, backtesting, and news/sentiment are not yet implemented.
-
-|Component                                                                    |Status     |
-|-----------------------------------------------------------------------------|-----------|
-|`deploy/setup.sh` — full Ubuntu server setup (15 steps, idempotent)         |✅ Complete|
-|`deploy/update.sh` — update from GitHub (SSH + HTTPS token support)         |✅ Complete|
-|`deploy/uninstall.sh` — interactive removal script                          |✅ Complete|
-|`deploy/systemd/` — systemd service units                                   |✅ Complete|
-|`db/` — SQLAlchemy models (LogEntry, Setting, Trade), migrations, seed      |✅ Complete|
-|`bot/utils/logger.py` — disk-first async logging                            |✅ Complete|
-|`bot/utils/config.py` — MariaDB settings loader with TTL cache              |✅ Complete|
-|`bot/utils/calendar.py` — NYSE trading calendar                             |✅ Complete|
-|`bot/core/engine.py` — trading loop with hot-reload mode switching          |✅ Complete|
-|`bot/core/broker.py` — IBKR connection via `ib_insync` (data + orders)      |✅ Complete|
-|`bot/universe/` — scanner + criteria scoring + Claude selector              |✅ Complete|
-|`bot/signals/indicators.py` — technical indicators via ta (5-min candles)   |✅ Complete|
-|`bot/signals/generator.py` — 15-min filter + Claude signal pipeline         |✅ Complete|
-|`bot/ml/` — LightGBM features, model, versioning, trainer                  |✅ Complete|
-|`bot/risk/manager.py` — circuit breaker + position sizing (fixed/Kelly)     |✅ Complete|
-|`bot/orders/executor.py` — IBKRBroker protocol + fill monitoring + fallback |✅ Complete|
-|`bot/orders/eod_close.py` — EOD close all positions + P&L calculation       |✅ Complete|
-|`bot/alerts/notifier.py` — email (SMTP/TLS) + HTTP webhook alerts           |✅ Complete|
-|`web/api/auth.py` — JWT authentication with rate limiting                   |✅ Complete|
-|`web/api/main.py` — 6 API endpoints (health, status, settings, logs, auth)  |✅ Complete|
-|HTTPS / Let’s Encrypt — provisioned by setup.sh                             |✅ Complete|
-|`tests/` — 255 tests (mocked IBKR, mocked Claude API, SQLite fixtures)      |✅ Complete|
-|`web/api/` — trade history, performance, portfolio API endpoints            |🔲 To do   |
-|`bot/backtesting/` — historical simulation engine                           |🔲 To do   |
-|`bot/sentiment/` — news & sentiment analysis (Alpaca + Finnhub)             |🔲 To do   |
-|`web/frontend/` — React management dashboard                               |🔲 To do   |
-|`web/api/routes/audit.py` — configuration audit trail                       |🔲 To do   |
-|`web/api/routes/costs.py` — Claude API + commission cost dashboard          |🔲 To do   |
-|`web/api/routes/export.py` — trade export (CSV / Excel)                     |🔲 To do   |
-|`bot/ml/ab_test.py` — A/B shadow model testing                             |🔲 To do   |
-|2FA (TOTP) for web interface                                                 |🔲 To do   |
-|Slippage & commission simulation in backtesting                              |🔲 To do   |
 
 -----
 
