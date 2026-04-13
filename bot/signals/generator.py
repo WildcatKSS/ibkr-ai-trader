@@ -216,7 +216,16 @@ def generate(
             indicators=snap,
         )
 
-    prompt = _build_prompt(symbol, ml_label, ml_prob, snap, entry, target, stop)
+    # Fetch sentiment score (non-blocking; defaults to 0.0 if unavailable)
+    sentiment_score = 0.0
+    try:
+        from bot.sentiment import get_sentiment
+        sentiment_score = get_sentiment(symbol)
+    except Exception:
+        pass
+
+    prompt = _build_prompt(symbol, ml_label, ml_prob, snap, entry, target, stop,
+                           sentiment=sentiment_score)
     try:
         from bot.utils.config import get as get_setting
         model = get_setting("CLAUDE_MODEL", default=_DEFAULT_MODEL)
@@ -394,6 +403,7 @@ def _build_prompt(
     suggested_entry: float,
     suggested_target: float,
     suggested_stop: float,
+    sentiment: float = 0.0,
 ) -> str:
     close = snap.get("close") or 0.0
     rsi = snap.get("rsi") or 0.0
@@ -407,6 +417,15 @@ def _build_prompt(
 
     ema_bias = "EMA9 > EMA21 (bullish)" if ema_cross == 1 else "EMA9 ≤ EMA21 (bearish)"
 
+    if sentiment > 0.2:
+        sentiment_text = f"POSITIVE ({sentiment:+.2f})"
+    elif sentiment < -0.2:
+        sentiment_text = f"NEGATIVE ({sentiment:+.2f})"
+    else:
+        sentiment_text = f"NEUTRAL ({sentiment:+.2f})"
+
+    sentiment_line = f"\nNews sentiment: {sentiment_text}" if sentiment != 0.0 else ""
+
     return f"""You are a precise intraday trading assistant for an automated bot.
 
 Symbol: {symbol}
@@ -417,7 +436,7 @@ Current price: ${close:.2f}  |  VWAP: ${vwap:.2f}  |  ATR: ${atr:.4f}
   {ema_bias}  |  BB%: {bb_pct:.2f}  |  MFI: {mfi:.1f}
 
 LightGBM signal: {ml_label.upper()} with {ml_prob:.1%} confidence
-15-min confirmation: PASSED (both timeframes agree)
+15-min confirmation: PASSED (both timeframes agree){sentiment_line}
 
 ATR-based suggestion:
   Entry: ${suggested_entry:.2f}  |  Target: ${suggested_target:.2f}  |  Stop: ${suggested_stop:.2f}
