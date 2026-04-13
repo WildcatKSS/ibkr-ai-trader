@@ -167,6 +167,14 @@ DEFAULTS: list[tuple[str, str, str]] = [
         "Minimum 5-day price return (%) that counts as strong momentum, "
         "in addition to the gap-up check.",
     ),
+    # ── Claude API ───────────────────────────────────────────────────────────
+    (
+        "CLAUDE_MODEL",
+        "claude-sonnet-4-6",
+        "Claude model used for signal confirmation and universe selection. "
+        "Change to a different model ID (e.g. 'claude-haiku-4-5-20251001') to "
+        "reduce cost or latency.",
+    ),
     # ── ML model ─────────────────────────────────────────────────────────────
     (
         "ML_FORWARD_BARS",

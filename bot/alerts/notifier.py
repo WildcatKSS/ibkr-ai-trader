@@ -9,6 +9,7 @@ Event types
 ``trade_opened``     Order filled / dryrun logged.
 ``trade_closed``     Position closed (EOD or stop/target hit).
 ``circuit_breaker``  Trading halted for the day.
+``eod_close_failed`` EOD close routine failed — positions may remain open.
 ``daily_summary``    End-of-day P&L summary.
 ``error``            Unhandled error in the trading loop.
 
@@ -118,6 +119,14 @@ def _format_message(event_type: str, payload: dict) -> tuple[str, str]:
             f"Wins:         {payload.get('wins', 0)}\n"
             f"Losses:       {payload.get('losses', 0)}\n"
             f"Total P&L:    {sign}{pnl:.2f} USD\n"
+        )
+
+    elif event_type == "eod_close_failed":
+        subject = "[IBKR Bot] CRITICAL — EOD close failed, positions may remain open"
+        body = (
+            f"Reason: {payload.get('reason', '')}\n"
+            f"Mode:   {mode}\n\n"
+            "IMMEDIATE ACTION REQUIRED: positions may be held overnight.\n"
         )
 
     elif event_type == "error":
