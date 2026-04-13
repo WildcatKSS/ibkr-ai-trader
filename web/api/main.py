@@ -11,6 +11,12 @@ Routes:
     GET  /api/settings      — list all settings
     PUT  /api/settings/{key}— update a setting
     GET  /api/logs          — recent log entries
+    GET  /api/trades        — trade history with filters
+    GET  /api/trades/open   — currently open positions
+    GET  /api/trades/{id}   — single trade detail
+    GET  /api/performance   — P&L and performance metrics
+    GET  /api/portfolio     — portfolio summary
+    POST /api/backtesting/run — run a backtest
 """
 
 from __future__ import annotations
@@ -268,3 +274,310 @@ async def recent_logs(
         }
         for r in rows
     ]
+
+
+# ---------------------------------------------------------------------------
+# Trades  (protected)
+# ---------------------------------------------------------------------------
+
+
+def _trade_to_dict(t) -> dict:
+    """Convert a Trade ORM instance to a JSON-safe dict."""
+    return {
+        "id": t.id,
+        "symbol": t.symbol,
+        "action": t.action,
+        "trading_mode": t.trading_mode,
+        "status": t.status,
+        "shares": t.shares,
+        "entry_price": t.entry_price,
+        "target_price": t.target_price,
+        "stop_price": t.stop_price,
+        "fill_price": t.fill_price,
+        "exit_price": t.exit_price,
+        "pnl": t.pnl,
+        "ibkr_order_id": t.ibkr_order_id,
+        "ml_label": t.ml_label,
+        "ml_probability": t.ml_probability,
+        "confirmed_15min": t.confirmed_15min,
+        "explanation": t.explanation,
+        "created_at": t.created_at.isoformat() if t.created_at else None,
+        "filled_at": t.filled_at.isoformat() if t.filled_at else None,
+        "closed_at": t.closed_at.isoformat() if t.closed_at else None,
+    }
+
+
+@app.get("/api/trades", tags=["trades"], summary="Trade history",
+         dependencies=[Depends(require_auth)])
+async def list_trades(
+    symbol: str | None = None,
+    status_filter: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict:
+    """
+    Return trades with optional filters.
+
+    - **symbol** — filter by ticker
+    - **status_filter** — ``closed``, ``open``, ``filled``, ``dryrun``, ``error``
+    - **limit** / **offset** — pagination (max 500)
+    """
+    from sqlalchemy import desc, func, select
+
+    from db.models import Trade
+    from db.session import get_session
+
+    limit = max(1, min(limit, 500))
+    offset = max(0, offset)
+
+    with get_session() as session:
+        q = select(Trade).order_by(desc(Trade.created_at))
+        count_q = select(func.count(Trade.id))
+
+        if symbol:
+            q = q.where(Trade.symbol == symbol.upper())
+            count_q = count_q.where(Trade.symbol == symbol.upper())
+        if status_filter:
+            q = q.where(Trade.status == status_filter)
+            count_q = count_q.where(Trade.status == status_filter)
+
+        total = session.execute(count_q).scalar() or 0
+        rows = session.scalars(q.offset(offset).limit(limit)).all()
+
+    return {
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "trades": [_trade_to_dict(r) for r in rows],
+    }
+
+
+@app.get("/api/trades/open", tags=["trades"], summary="Open positions",
+         dependencies=[Depends(require_auth)])
+async def open_trades() -> list[dict]:
+    """Return all trades with status pending, open, or filled (active positions)."""
+    from sqlalchemy import desc, select
+
+    from db.models import Trade
+    from db.session import get_session
+
+    with get_session() as session:
+        rows = session.scalars(
+            select(Trade)
+            .where(Trade.status.in_(["pending", "open", "filled"]))
+            .order_by(desc(Trade.created_at))
+        ).all()
+
+    return [_trade_to_dict(r) for r in rows]
+
+
+@app.get("/api/trades/{trade_id}", tags=["trades"], summary="Trade detail",
+         dependencies=[Depends(require_auth)])
+async def get_trade(trade_id: int) -> dict:
+    """Return a single trade by ID."""
+    from db.models import Trade
+    from db.session import get_session
+
+    with get_session() as session:
+        trade = session.get(Trade, trade_id)
+        if trade is None:
+            raise HTTPException(status_code=404, detail="Trade not found")
+        return _trade_to_dict(trade)
+
+
+# ---------------------------------------------------------------------------
+# Performance  (protected)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/performance", tags=["performance"],
+         summary="P&L and performance metrics",
+         dependencies=[Depends(require_auth)])
+async def performance(
+    period: str = "all",
+) -> dict:
+    """
+    Compute performance metrics from closed trades.
+
+    **period**: ``1d``, ``7d``, ``30d``, or ``all``.
+    """
+    from datetime import timedelta
+
+    from sqlalchemy import select
+
+    from db.models import Trade
+    from db.session import get_session
+
+    now = datetime.now(tz=timezone.utc)
+
+    period_map = {"1d": 1, "7d": 7, "30d": 30}
+    days = period_map.get(period)
+
+    with get_session() as session:
+        q = select(Trade).where(Trade.status == "closed")
+        if days is not None:
+            cutoff = now - timedelta(days=days)
+            q = q.where(Trade.closed_at >= cutoff)
+        q = q.order_by(Trade.closed_at)
+        rows = session.scalars(q).all()
+
+    if not rows:
+        return {
+            "period": period,
+            "trade_count": 0,
+            "total_pnl": 0.0,
+            "win_rate": 0.0,
+            "avg_pnl": 0.0,
+            "largest_win": 0.0,
+            "largest_loss": 0.0,
+            "profit_factor": 0.0,
+            "timestamp": now.isoformat(),
+        }
+
+    pnls = [r.pnl for r in rows if r.pnl is not None]
+    wins = [p for p in pnls if p > 0]
+    losses = [p for p in pnls if p <= 0]
+    gross_profit = sum(wins) if wins else 0.0
+    gross_loss = abs(sum(losses)) if losses else 0.0
+
+    return {
+        "period": period,
+        "trade_count": len(pnls),
+        "total_pnl": round(sum(pnls), 2),
+        "win_rate": round(len(wins) / len(pnls) * 100, 1) if pnls else 0.0,
+        "avg_pnl": round(sum(pnls) / len(pnls), 2) if pnls else 0.0,
+        "largest_win": round(max(wins), 2) if wins else 0.0,
+        "largest_loss": round(min(losses), 2) if losses else 0.0,
+        "profit_factor": round(gross_profit / gross_loss, 2) if gross_loss > 0 else 0.0,
+        "timestamp": now.isoformat(),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Portfolio  (protected)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/portfolio", tags=["portfolio"], summary="Portfolio summary",
+         dependencies=[Depends(require_auth)])
+async def portfolio() -> dict:
+    """Return portfolio summary: open positions, daily P&L, total value."""
+    from datetime import date
+
+    from sqlalchemy import func, select
+
+    from db.models import Trade
+    from db.session import get_session
+
+    today = date.today()
+    day_start = datetime(today.year, today.month, today.day, tzinfo=timezone.utc)
+
+    with get_session() as session:
+        # Open positions
+        open_rows = session.scalars(
+            select(Trade)
+            .where(Trade.status.in_(["pending", "open", "filled"]))
+        ).all()
+
+        # Today's closed P&L
+        today_pnl = session.execute(
+            select(func.coalesce(func.sum(Trade.pnl), 0.0))
+            .where(Trade.status == "closed", Trade.closed_at >= day_start)
+        ).scalar() or 0.0
+
+        # Today's trade count
+        today_count = session.execute(
+            select(func.count(Trade.id))
+            .where(Trade.created_at >= day_start)
+        ).scalar() or 0
+
+    positions = [
+        {
+            "symbol": t.symbol,
+            "action": t.action,
+            "shares": t.shares,
+            "entry_price": t.entry_price,
+            "fill_price": t.fill_price,
+            "target_price": t.target_price,
+            "stop_price": t.stop_price,
+            "status": t.status,
+        }
+        for t in open_rows
+    ]
+
+    return {
+        "open_positions": positions,
+        "position_count": len(positions),
+        "daily_pnl": round(float(today_pnl), 2),
+        "daily_trades": today_count,
+        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Backtesting  (protected)
+# ---------------------------------------------------------------------------
+
+
+class BacktestRequest(BaseModel):
+    """Request body for POST /api/backtesting/run."""
+
+    symbol: str = Field(..., max_length=20)
+    initial_capital: float = Field(default=100_000, gt=0)
+    position_size_pct: float = Field(default=2.0, gt=0, le=100)
+    stop_loss_atr: float = Field(default=1.0, gt=0)
+    take_profit_atr: float = Field(default=2.0, gt=0)
+    ml_min_probability: float = Field(default=0.55, ge=0, le=1)
+
+
+@app.post("/api/backtesting/run", tags=["backtesting"],
+          summary="Run a backtest",
+          dependencies=[Depends(require_auth)])
+async def run_backtest(body: BacktestRequest) -> dict:
+    """
+    Run a backtest using the current LightGBM model on historical data
+    fetched from IBKR (if connected) or return an error.
+
+    This endpoint runs synchronously and may take several seconds.
+    """
+    from bot.backtesting.engine import BacktestEngine
+
+    # Try to fetch historical data from the broker
+    bars = _fetch_backtest_data(body.symbol)
+    if bars is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Cannot fetch historical data. Ensure IBKR is connected "
+                   "or provide data via the CLI backtest command.",
+        )
+
+    engine = BacktestEngine(
+        initial_capital=body.initial_capital,
+        position_size_pct=body.position_size_pct,
+        stop_loss_atr=body.stop_loss_atr,
+        take_profit_atr=body.take_profit_atr,
+        ml_min_probability=body.ml_min_probability,
+    )
+    result = engine.run(bars, symbol=body.symbol.upper())
+    return result.to_dict()
+
+
+def _fetch_backtest_data(symbol: str):
+    """Attempt to fetch historical bars via the broker (if available)."""
+    try:
+        from bot.core.broker import IBKRConnection
+        import os
+
+        port_str = os.getenv("IBKR_PORT", "")
+        if not port_str:
+            return None
+
+        conn = IBKRConnection(port=int(port_str))
+        conn.connect()
+        try:
+            bars = conn.fetch_intraday_bars(symbol, n_bars=1000, bar_size="5 mins")
+            return bars
+        finally:
+            conn.disconnect()
+    except Exception:
+        return None
