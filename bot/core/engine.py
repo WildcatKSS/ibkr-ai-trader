@@ -509,4 +509,45 @@ class TradingEngine:
         if self._trading_mode != "dryrun":
             log.info("Shutdown: closing any remaining open positions")
             self._eod_close()
+        self._send_daily_summary()
         log.info("Engine shutdown complete")
+
+    def _send_daily_summary(self) -> None:
+        """Send a daily P&L summary alert at shutdown."""
+        try:
+            from datetime import date, datetime, timezone
+
+            from sqlalchemy import func, select
+
+            from bot.alerts.notifier import notify
+            from db.models import Trade
+            from db.session import get_session
+
+            today = date.today()
+            day_start = datetime(today.year, today.month, today.day, tzinfo=timezone.utc)
+
+            with get_session() as session:
+                rows = session.execute(
+                    select(Trade.pnl)
+                    .where(Trade.status == "closed", Trade.closed_at >= day_start)
+                ).all()
+
+            if not rows:
+                return  # no trades today — nothing to summarise
+
+            pnls = [r[0] for r in rows if r[0] is not None]
+            if not pnls:
+                return
+
+            wins = [p for p in pnls if p > 0]
+            losses = [p for p in pnls if p <= 0]
+
+            notify("daily_summary", {
+                "trade_count": len(pnls),
+                "wins": len(wins),
+                "losses": len(losses),
+                "total_pnl": round(sum(pnls), 2),
+                "trading_mode": self._trading_mode,
+            })
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Failed to send daily summary", error=str(exc))

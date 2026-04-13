@@ -110,6 +110,15 @@ def check(
                 symbol=signal.symbol,
                 reason=cb_reason,
             )
+            try:
+                from bot.alerts.notifier import notify
+                notify("circuit_breaker", {
+                    "reason": cb_reason,
+                    "symbol": signal.symbol,
+                    "trading_mode": trading_mode,
+                })
+            except BaseException:  # noqa: BLE001
+                pass  # alert failure must never block the risk decision
             return RiskDecision(
                 approved=False,
                 shares=0,

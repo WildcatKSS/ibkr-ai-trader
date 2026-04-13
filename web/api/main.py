@@ -47,7 +47,12 @@ def _cors_origins() -> list[str]:
     Always permits localhost for local development.  If DOMAIN is set,
     the production HTTPS origin is added automatically.
     """
-    origins = ["http://localhost", "http://127.0.0.1"]
+    origins = [
+        "http://localhost",
+        "http://127.0.0.1",
+        "http://localhost:5173",    # Vite dev server
+        "http://127.0.0.1:5173",
+    ]
     domain = os.getenv("DOMAIN", "").strip()
     if domain:
         origins.append(f"https://{domain}")

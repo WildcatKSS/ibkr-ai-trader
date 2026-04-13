@@ -34,11 +34,9 @@ ib_insync>=0.9.86              # async TWS / IB Gateway API wrapper
 anthropic>=0.25.0
 
 # ── Market data & news ────────────────────────────────────────────────────────
-# alpaca-py and finnhub-python are listed here as placeholders for the
-# news/sentiment module (not yet implemented).  Uncomment when the module
-# is built.
-# alpaca-py>=0.21.0            # Alpaca News API (primary news provider)
-# finnhub-python>=2.4.19       # Finnhub (fallback news provider)
+# The sentiment module (bot/sentiment/) uses the requests library to call the
+# Alpaca News and Finnhub REST APIs directly — no SDK packages needed.
+requests>=2.31.0               # HTTP client for Alpaca News + Finnhub sentiment APIs
 
 # ── Trading calendar ──────────────────────────────────────────────────────────
 # NYSE trading calendar — imported exclusively via bot/utils/calendar.py
