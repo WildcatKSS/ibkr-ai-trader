@@ -2,7 +2,7 @@
 
 An open-source intraday trading bot for Interactive Brokers, powered by Claude AI. Focused exclusively on **stocks and ETFs** — positions are opened and closed within the same trading day, with no overnight exposure.
 
-> ⚠️ **Work in progress** — The core trading pipeline is complete and tested: IBKR broker integration, universe selection, signal generation (LightGBM + 15-min filter + Claude), risk management (circuit breaker + position sizing), order execution (fill monitoring + market-order fallback), EOD close routine, and email/webhook alerting — with a **255-test suite**. The web frontend, backtesting engine, and news/sentiment module are not yet implemented. See the [Development Status](#-development-status) section for a full overview. **Contributions are welcome** — see [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
+**Contributions are welcome** — see [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
 
 -----
 
@@ -21,7 +21,7 @@ An open-source intraday trading bot for Interactive Brokers, powered by Claude A
 
 - **Universe selection** — Claude autonomously scans and selects the most promising stocks & ETFs for intraday trading, with configurable autonomous or human-approval mode
 - **AI-powered trading signals** — LightGBM generates intraday signals on 5-min candles, confirmed on 15-min timeframe, with Claude providing reasoning and context
-- **News & sentiment analysis** — Real-time news is processed by Claude to gauge market sentiment *(not yet implemented)*
+- **News & sentiment analysis** — Real-time news from Alpaca and Finnhub is scored for market sentiment and fed into the signal pipeline
 - **Explainability** — Every automated action, including universe selection, is explained in plain language by Claude and logged
 
 ### Risk & safety
@@ -34,20 +34,21 @@ An open-source intraday trading bot for Interactive Brokers, powered by Claude A
 
 ### Model & backtesting
 
-- **Backtesting** — Test strategies against historical market data before going live *(not yet implemented)*
+- **Backtesting** — Test strategies against historical market data before going live, with Sharpe ratio, max drawdown, win rate, and equity curve
 - **Model version control** — Every LightGBM retrain is versioned and stored; roll back to any previous model via CLI
 - **A/B model testing** — Run a new model version in paper trading alongside the live model before promoting it to production *(not yet implemented)*
 
 ### Monitoring & interface
 
-- **Performance dashboard** — P&L charts, Sharpe ratio, win rate, max drawdown, and more *(not yet implemented)*
+- **Performance dashboard** — P&L charts, Sharpe ratio, win rate, max drawdown, and more via the React web interface
 - **Cost dashboard** — Real-time overview of Claude API costs, IBKR commissions, and net P&L after all costs *(not yet implemented)*
 - **Comprehensive logging** — DEBUG-level logs across all categories, written to disk and MariaDB
 - **Alerting** — Real-time notifications via email on critical events
 - **Webhook support** — Push events to any external system via configurable HTTP webhooks
 - **Trade export** — Download full trade history as CSV or Excel from the web interface *(not yet implemented)*
 - **Configuration audit trail** — Every change made via the web interface is logged with timestamp and user *(not yet implemented)*
-- **Web API** — Settings and configuration managed via REST API; web frontend not yet built
+- **Web dashboard** — React management interface with login, dashboard, trade history, performance charts, settings, and backtesting UI
+- **Web API** — 12 REST API endpoints for status, settings, trades, performance, portfolio, logs, and backtesting
 - **Security** — HTTPS via Let’s Encrypt, JWT authentication with rate limiting
 
 -----
@@ -123,8 +124,14 @@ ibkr-ai-trader/
 │   │   └── eod_close.py            # End-of-day close all positions
 │   ├── alerts/
 │   │   └── notifier.py             # Email (SMTP/TLS) + HTTP webhook alerts
-│   ├── backtesting/                # Historical simulation engine (not yet implemented)
-│   ├── sentiment/                  # News & sentiment analysis (not yet implemented)
+│   ├── backtesting/
+│   │   ├── engine.py               # Historical bar replay with simulated execution
+│   │   ├── metrics.py              # Sharpe, drawdown, win rate, profit factor
+│   │   └── results.py              # Result dataclass and JSON serialisation
+│   ├── sentiment/
+│   │   ├── alpaca.py               # Alpaca News API v2 client (primary)
+│   │   ├── finnhub.py              # Finnhub company news client (fallback)
+│   │   └── scorer.py               # Keyword sentiment scoring with recency weighting
 │   └── utils/
 │       ├── __init__.py
 │       ├── logger.py               # Disk-first, async MariaDB flush logger
@@ -133,9 +140,13 @@ ibkr-ai-trader/
 ├── web/
 │   ├── api/
 │   │   ├── __init__.py
-│   │   ├── main.py                 # FastAPI app (health, status, settings, logs endpoints)
+│   │   ├── main.py                 # FastAPI app (12 endpoints: health, status, settings, logs, trades, performance, portfolio, backtesting)
 │   │   └── auth.py                 # JWT authentication + rate limiting
-│   └── frontend/                   # React dashboard (not yet implemented)
+│   └── frontend/
+│       └── src/
+│           ├── App.tsx             # Root router (HashRouter with auth guard)
+│           ├── api.ts              # Typed API client with token management
+│           └── components/         # Login, Dashboard, TradeHistory, Performance, Settings, Backtesting, Layout
 ├── db/
 │   ├── models.py                   # SQLAlchemy ORM models (MariaDB)
 │   ├── migrations/                 # Alembic database migrations
@@ -268,6 +279,7 @@ ALPACA_API_KEY=your_alpaca_api_key
 ALPACA_API_SECRET=your_alpaca_api_secret
 FINNHUB_API_KEY=your_finnhub_api_key
 SMTP_PASSWORD=your_smtp_password
+WEB_PASSWORD=your_dashboard_password
 ```
 
 All operational settings (trading mode, risk parameters, universe selection, position sizing, etc.) are configured via the web interface after first login. The `.env` file is only for secrets and connection details.
@@ -437,9 +449,11 @@ Claude determines when to close a position based on price target reached, stop-l
 
 -----
 
-### 6 · Sentiment Analysis *(not yet implemented)*
+### 6 · Sentiment Analysis
 
-> This module is planned but not yet built. When implemented, news headlines and articles for all instruments in the active universe will be passed to Claude for sentiment scoring. See the [Development Status](#-development-status) section.
+Before Claude makes its final trading decision, the bot fetches recent news articles for the instrument from the **Alpaca News API** (primary) and **Finnhub** (fallback). Each article is scored using keyword-based sentiment analysis weighted by recency (newer articles have more influence, with a half-life of ~6 hours). The aggregated sentiment score (-1.0 bearish to +1.0 bullish) is included in the Claude prompt as additional context.
+
+**Explained in the web interface:** the sentiment score for the instrument, the number of articles analysed, and whether the score was positive, negative, or neutral.
 
 -----
 
@@ -562,9 +576,39 @@ The bot sends real-time email notifications for critical events:
 
 -----
 
-## Backtesting *(not yet implemented)*
+## Backtesting
 
-> The backtesting engine is planned but not yet built. When implemented, it will reuse the existing signal pipeline (indicators, LightGBM, risk manager) to replay historical data and calculate performance metrics (Sharpe ratio, max drawdown, win rate). See the [Development Status](#-development-status) section.
+The backtesting engine (`bot/backtesting/`) replays historical OHLCV data through the existing signal pipeline (indicators, LightGBM, 15-min confirmation) with simulated order execution. Claude API calls are skipped to keep backtests fast and reproducible.
+
+### How it works
+
+1. Pre-compute technical indicators and ML features on the full dataset
+2. For each bar after warmup (60 bars), get a LightGBM prediction
+3. Check 15-min confirmation (EMA cross + MACD direction)
+4. If confirmed, open a simulated position with ATR-based stop/target
+5. Monitor stop-loss and take-profit on each subsequent bar
+6. Close any remaining position at the end of the dataset
+
+### Metrics
+
+The engine computes: total return, total P&L, trade count, win rate, average win/loss, profit factor, max drawdown, Sharpe ratio, largest win/loss.
+
+### Usage
+
+**Via CLI:**
+```bash
+python -m bot.backtesting.engine --symbol AAPL --data historical.csv --capital 100000
+```
+
+**Via API:**
+```bash
+curl -X POST http://localhost:8000/api/backtesting/run \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"symbol": "AAPL", "initial_capital": 100000, "position_size_pct": 2.0}'
+```
+
+**Via web interface:** the Backtesting page lets you configure parameters, run a backtest, and view the equity curve chart and trade log.
 
 -----
 
@@ -602,9 +646,18 @@ Approved instruments enter the active trading universe immediately. Rejected one
 
 -----
 
-## Performance Dashboard *(not yet implemented)*
+## Web Dashboard
 
-> The web frontend and performance dashboard are planned but not yet built. When implemented, the dashboard will show P&L charts, win rate, Sharpe ratio, max drawdown, trade log, and open positions. See the [Development Status](#-development-status) section.
+The React management interface (Vite + TypeScript + Tailwind CSS) provides:
+
+- **Login** — JWT authentication with sessionStorage token
+- **Dashboard** — Trading mode, market status, daily P&L, trade count, open positions
+- **Trade History** — Paginated trade log with symbol and status filters
+- **Performance** — Period filters (1d/7d/30d/all), metrics cards, cumulative P&L chart (Recharts)
+- **Settings** — Inline editing of all operational settings
+- **Backtesting** — Parameter form, equity curve chart, trade log table
+
+The frontend is built to `web/frontend/static/` and served by Nginx. The API proxy routes `/api/*` to the FastAPI backend on port 8000.
 
 -----
 
@@ -672,6 +725,7 @@ After `setup.sh` runs, fill in only your external API keys and passwords. Everyt
 |`ALPACA_API_SECRET`|You     |Alpaca News API secret                                                 |
 |`FINNHUB_API_KEY`  |You     |Finnhub API key (fallback news provider)                               |
 |`SMTP_PASSWORD`    |You     |SMTP password or app password for email alerts                         |
+|`WEB_PASSWORD`     |You     |Admin password for the web dashboard login (JWT-authenticated)         |
 |`DB_PASSWORD`      |setup.sh|Generated automatically                                                |
 |`SECRET_KEY`       |setup.sh|Session signing key; generated automatically                           |
 |`DOMAIN`           |setup.sh|Your domain name; entered during setup for Certbot                     |
@@ -745,15 +799,15 @@ Every setting below is managed via **Settings** in the web interface. Changes ta
 |`ALERTS_WEBHOOKS_ENABLED`  |`false`         |Enable HTTP webhook notifications   |
 |`ALERTS_WEBHOOK_URL`       |—               |HTTP endpoint for trade events      |
 
-All 56 default settings are defined in `db/seed.py`. Run `python db/seed.py` to insert missing defaults after adding new settings.
+All 42 default settings are defined in `db/seed.py`. Run `python db/seed.py` to insert missing defaults after adding new settings.
 
 -----
 
 ## Data Sources
 
-### News & Sentiment *(not yet implemented)*
+### News & Sentiment
 
-> When implemented, the bot will use the **Alpaca News API** as the primary source for real-time news headlines and the **Finnhub API** as a configurable fallback. Claude will process each news item and return a sentiment score that feeds into signal generation. API keys for both services are configured in `.env`. See the [Development Status](#-development-status) section.
+The bot uses the **Alpaca News API v2** as the primary source for recent news articles (last 24 hours) and the **Finnhub company news API** as a fallback. Articles are scored using keyword-based sentiment analysis with recency weighting. The aggregated score (-1.0 to +1.0) is included in the Claude prompt for the final trading decision. API keys for both services are configured in `.env`.
 
 ### Historical Data
 
@@ -824,7 +878,7 @@ Dry run is useful for:
 - Verifying configuration changes before switching to paper or live
 - Demonstrating the bot’s decision-making without capital at risk
 
-Switch modes via the API:
+Switch modes via the web dashboard under **Settings**, or via the API:
 
 ```bash
 curl -X PUT http://localhost:8000/api/settings/TRADING_MODE \
@@ -866,47 +920,6 @@ Each webhook payload is a JSON POST with the event type, timestamp, and relevant
 ## Disclaimer
 
 This project is for **educational purposes only**. Trading financial instruments involves significant risk of loss. The authors are not responsible for any financial losses incurred through the use of this software. Always test thoroughly on a paper trading account before going live.
-
------
-
-## Development Status
-
-This project is in active development. The core trading pipeline is complete; IBKR broker integration, web frontend, backtesting, and news/sentiment are not yet implemented.
-
-|Component                                                                    |Status     |
-|-----------------------------------------------------------------------------|-----------|
-|`deploy/setup.sh` — full Ubuntu server setup (15 steps, idempotent)         |✅ Complete|
-|`deploy/update.sh` — update from GitHub (SSH + HTTPS token support)         |✅ Complete|
-|`deploy/uninstall.sh` — interactive removal script                          |✅ Complete|
-|`deploy/systemd/` — systemd service units                                   |✅ Complete|
-|`db/` — SQLAlchemy models (LogEntry, Setting, Trade), migrations, seed      |✅ Complete|
-|`bot/utils/logger.py` — disk-first async logging                            |✅ Complete|
-|`bot/utils/config.py` — MariaDB settings loader with TTL cache              |✅ Complete|
-|`bot/utils/calendar.py` — NYSE trading calendar                             |✅ Complete|
-|`bot/core/engine.py` — trading loop with hot-reload mode switching          |✅ Complete|
-|`bot/core/broker.py` — IBKR connection via `ib_insync` (data + orders)      |✅ Complete|
-|`bot/universe/` — scanner + criteria scoring + Claude selector              |✅ Complete|
-|`bot/signals/indicators.py` — technical indicators via ta (5-min candles)   |✅ Complete|
-|`bot/signals/generator.py` — 15-min filter + Claude signal pipeline         |✅ Complete|
-|`bot/ml/` — LightGBM features, model, versioning, trainer                  |✅ Complete|
-|`bot/risk/manager.py` — circuit breaker + position sizing (fixed/Kelly)     |✅ Complete|
-|`bot/orders/executor.py` — IBKRBroker protocol + fill monitoring + fallback |✅ Complete|
-|`bot/orders/eod_close.py` — EOD close all positions + P&L calculation       |✅ Complete|
-|`bot/alerts/notifier.py` — email (SMTP/TLS) + HTTP webhook alerts           |✅ Complete|
-|`web/api/auth.py` — JWT authentication with rate limiting                   |✅ Complete|
-|`web/api/main.py` — 6 API endpoints (health, status, settings, logs, auth)  |✅ Complete|
-|HTTPS / Let’s Encrypt — provisioned by setup.sh                             |✅ Complete|
-|`tests/` — 255 tests (mocked IBKR, mocked Claude API, SQLite fixtures)      |✅ Complete|
-|`web/api/` — trade history, performance, portfolio API endpoints            |🔲 To do   |
-|`bot/backtesting/` — historical simulation engine                           |🔲 To do   |
-|`bot/sentiment/` — news & sentiment analysis (Alpaca + Finnhub)             |🔲 To do   |
-|`web/frontend/` — React management dashboard                               |🔲 To do   |
-|`web/api/routes/audit.py` — configuration audit trail                       |🔲 To do   |
-|`web/api/routes/costs.py` — Claude API + commission cost dashboard          |🔲 To do   |
-|`web/api/routes/export.py` — trade export (CSV / Excel)                     |🔲 To do   |
-|`bot/ml/ab_test.py` — A/B shadow model testing                             |🔲 To do   |
-|2FA (TOTP) for web interface                                                 |🔲 To do   |
-|Slippage & commission simulation in backtesting                              |🔲 To do   |
 
 -----
 
