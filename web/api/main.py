@@ -17,6 +17,22 @@ Routes:
     GET  /api/performance   — P&L and performance metrics
     GET  /api/portfolio     — portfolio summary
     POST /api/backtesting/run — run a backtest
+    GET  /api/bot/service-status — ibkr-bot systemd state
+    POST /api/bot/start     — start the ibkr-bot service
+    POST /api/bot/stop      — stop the ibkr-bot service (confirm="STOP")
+    POST /api/bot/restart   — restart the ibkr-bot service (confirm="RESTART")
+    POST /api/logs/stream-token — issue a single-use SSE stream token
+    GET  /api/logs/stream   — Server-Sent Events log stream (uses stream_token)
+    GET  /api/ml/versions   — list all registered model versions
+    GET  /api/ml/current    — current active model version
+    POST /api/ml/retrain    — queue a retrain job (202 + job_id)
+    POST /api/ml/rollback   — roll back to a previous model version
+    GET  /api/ml/jobs/{id}  — inspect a single ML job
+    GET  /api/ml/jobs       — list recent ML jobs
+    GET  /api/universe/pending — most recent scan awaiting approval
+    GET  /api/universe/history — recent scans
+    POST /api/universe/approve — approve a candidate symbol
+    POST /api/universe/reject  — reject today's scan
 """
 
 from __future__ import annotations
@@ -31,6 +47,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from bot.utils.logger import get_logger, shutdown as logger_shutdown
 from web.api.auth import require_auth, router as auth_router
+from web.api.logs_stream import router as logs_stream_router
+from web.api.ml_admin import router as ml_admin_router
+from web.api.service import router as service_router
+from web.api.universe import router as universe_router
 
 log = get_logger("web")
 
@@ -94,6 +114,10 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(service_router)
+app.include_router(logs_stream_router)
+app.include_router(ml_admin_router)
+app.include_router(universe_router)
 
 
 # ---------------------------------------------------------------------------

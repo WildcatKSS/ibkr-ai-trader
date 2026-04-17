@@ -159,6 +159,18 @@ class TradingEngine:
             self._eod_close()
             return
 
+        # In approval mode the watchlist stays empty until the user decides.
+        # Check for an approved row each tick so the moment the user clicks
+        # "Approve" the engine picks the symbol up without needing a restart.
+        if get("UNIVERSE_APPROVAL_MODE", "autonomous") == "approval" and not self._watchlist:
+            approved = self._load_approved_selection()
+            if approved:
+                self._watchlist = [approved]
+                log.info("Approved symbol loaded", symbol=approved)
+            else:
+                log.info("Approval mode — awaiting user selection, skipping tick")
+                return
+
         log.info(
             "Market open — running signal scan",
             trading_mode=self._trading_mode,
@@ -298,7 +310,23 @@ class TradingEngine:
             self._watchlist = [c.symbol for c in candidates[:n]]
             return
 
+        if mode == "approval":
+            # Persist the full ranked list so the user can review and approve
+            # a single symbol from the web UI.  Trading is gated on their
+            # decision — _run_signals checks _load_approved_selection().
+            self._persist_selection(selection, candidates, status="pending_approval")
+            self._watchlist = []
+            log.info(
+                "Universe scan complete — awaiting approval",
+                mode=mode,
+                candidates_scored=len(candidates),
+                top_candidate=candidates[0].symbol if candidates else None,
+            )
+            return
+
+        # autonomous mode: trade the first symbol immediately.
         self._watchlist = selection.selected
+        self._persist_selection(selection, candidates, status="autonomous")
 
         log.info(
             "Universe scan complete",
@@ -307,6 +335,99 @@ class TradingEngine:
             candidates_scored=len(candidates),
             reasoning=selection.reasoning[:120] if selection.reasoning else "",
         )
+
+    def _persist_selection(
+        self,
+        selection: Any,
+        candidates: list,
+        *,
+        status: str,
+    ) -> None:
+        """Write (or overwrite) today's UniverseSelection row."""
+        from datetime import date
+
+        from sqlalchemy import select as sa_select
+
+        from db.models import UniverseSelection
+        from db.session import get_session
+
+        today = date.today()
+        serialised = [
+            {
+                "symbol": c.symbol,
+                "score": float(c.score),
+                "passes_all_core": bool(c.passes_all),
+                "near_resistance": bool(c.near_resistance),
+                "has_momentum": bool(c.has_momentum),
+                "pullback_above_ema9": bool(c.pullback_above_ema9),
+                "analysis": selection.analysis.get(c.symbol, ""),
+            }
+            for c in candidates
+        ]
+        selected = (
+            selection.selected[0]
+            if status == "autonomous" and selection.selected
+            else None
+        )
+        now = datetime.now(tz=timezone.utc)
+
+        try:
+            with get_session() as session:
+                row = session.scalars(
+                    sa_select(UniverseSelection)
+                    .where(UniverseSelection.scan_date == today)
+                    .limit(1)
+                ).first()
+                if row is None:
+                    row = UniverseSelection(
+                        scan_date=today,
+                        candidates=serialised,
+                        selected_symbol=selected,
+                        status=status,
+                        reasoning=selection.reasoning,
+                        created_at=now,
+                    )
+                    session.add(row)
+                elif row.status in ("pending_approval", "autonomous"):
+                    # Only overwrite rows that haven't been decided by a user.
+                    row.candidates = serialised
+                    row.selected_symbol = selected
+                    row.status = status
+                    row.reasoning = selection.reasoning
+                    row.created_at = now
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Failed to persist universe selection", error=str(exc))
+
+    def _load_approved_selection(self) -> str | None:
+        """
+        Return the approved symbol for today, or None.
+
+        When the engine runs in approval mode and no row is approved yet,
+        this returns None and the signal scan is skipped for this tick.
+        """
+        from datetime import date
+
+        from sqlalchemy import select as sa_select
+
+        from db.models import UniverseSelection
+        from db.session import get_session
+
+        today = date.today()
+        try:
+            with get_session() as session:
+                row = session.scalars(
+                    sa_select(UniverseSelection)
+                    .where(UniverseSelection.scan_date == today)
+                    .limit(1)
+                ).first()
+            if row is None:
+                return None
+            if row.status == "approved" and row.selected_symbol:
+                return row.selected_symbol
+            return None
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Cannot read universe selection", error=str(exc))
+            return None
 
     def _run_signals(self) -> None:
         """

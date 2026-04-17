@@ -62,11 +62,15 @@ def get_model_path(version: str | None = None) -> Path | None:
     Uses the current version when *version* is None.
     Returns None when no version is registered or the file does not exist.
     """
+    manifest = _load_manifest()
     if version is None:
-        version = get_current_version()
+        version = manifest.get("current")
     if version is None:
         return None
-    path = _MODELS_DIR / f"model_{version}.lgbm"
+    trusted = _find_in_manifest(manifest, version)
+    if trusted is None:
+        return None
+    path = _MODELS_DIR / f"model_{trusted}.lgbm"
     return path if path.exists() else None
 
 
@@ -113,15 +117,16 @@ def rollback(version: str) -> None:
     is missing.
     """
     manifest = _load_manifest()
-    known = {v["version"] for v in manifest.get("versions", [])}
-    if version not in known:
-        raise ValueError(f"Unknown version '{version}'. Known: {sorted(known)}")
-    path = _MODELS_DIR / f"model_{version}.lgbm"
+    trusted = _find_in_manifest(manifest, version)
+    if trusted is None:
+        known = sorted(v["version"] for v in manifest.get("versions", []))
+        raise ValueError(f"Unknown version '{version}'. Known: {known}")
+    path = _MODELS_DIR / f"model_{trusted}.lgbm"
     if not path.exists():
-        raise ValueError(f"Model file not found: {path}")
-    manifest["current"] = version
+        raise ValueError(f"Model file not found for version '{trusted}'.")
+    manifest["current"] = trusted
     _save_manifest(manifest)
-    log.info("Model rolled back", version=version)
+    log.info("Model rolled back", version=trusted)
 
 
 def make_version_string() -> str:
@@ -132,6 +137,18 @@ def make_version_string() -> str:
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
+
+
+def _find_in_manifest(manifest: dict[str, Any], version: str) -> str | None:
+    """Look up *version* in the manifest and return the manifest's own copy.
+
+    This breaks the taint chain for static analysis: the returned string
+    originates from the manifest file (trusted), not from user input.
+    """
+    for entry in manifest.get("versions", []):
+        if entry["version"] == version:
+            return entry["version"]
+    return None
 
 
 def _load_manifest() -> dict[str, Any]:

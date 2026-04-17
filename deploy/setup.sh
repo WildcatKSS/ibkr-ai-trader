@@ -198,6 +198,20 @@ server {
         add_header Cache-Control "public, immutable";
     }
 
+    # Server-Sent Events — must not be buffered, long-lived
+    location = /api/logs/stream {
+        proxy_pass         http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header   Host \$host;
+        proxy_set_header   X-Real-IP \$remote_addr;
+        proxy_set_header   X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto \$scheme;
+        proxy_buffering    off;
+        proxy_cache        off;
+        proxy_read_timeout 24h;
+        chunked_transfer_encoding on;
+    }
+
     # FastAPI backend (with WebSocket support)
     location / {
         proxy_pass         http://127.0.0.1:8000;
@@ -304,6 +318,20 @@ server {
         alias ${APP_DIR}/web/frontend/static/;
         expires 30d;
         add_header Cache-Control "public, immutable";
+    }
+
+    # Server-Sent Events — must not be buffered, long-lived
+    location = /api/logs/stream {
+        proxy_pass         http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header   Host \$host;
+        proxy_set_header   X-Real-IP \$remote_addr;
+        proxy_set_header   X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto \$scheme;
+        proxy_buffering    off;
+        proxy_cache        off;
+        proxy_read_timeout 24h;
+        chunked_transfer_encoding on;
     }
 
     # FastAPI backend (with WebSocket support)
@@ -475,6 +503,32 @@ if [[ "$SERVICES_INSTALLED" == true ]]; then
         fi
     done
 fi
+
+# ---------------------------------------------------------------------------
+# Step 11b — sudoers rule for GUI-driven bot control
+# ---------------------------------------------------------------------------
+# The web service runs as the unprivileged ${APP_USER} user but needs to
+# start / stop / restart ibkr-bot.service from the dashboard.  We grant
+# NOPASSWD access to *exactly* those three systemctl invocations — no
+# wildcards, no other units.  visudo -cf validates the file before install.
+step "11b — sudoers rule for service control"
+SUDOERS_FILE="/etc/sudoers.d/ibkr-web"
+SUDOERS_TMP=$(mktemp)
+cat > "$SUDOERS_TMP" <<SUDOERS
+# Managed by deploy/setup.sh — allow the web UI to control the bot service.
+${APP_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl start ibkr-bot
+${APP_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl stop ibkr-bot
+${APP_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl restart ibkr-bot
+SUDOERS
+chmod 0440 "$SUDOERS_TMP"
+if visudo -cf "$SUDOERS_TMP" >/dev/null 2>&1; then
+    install -m 0440 -o root -g root "$SUDOERS_TMP" "$SUDOERS_FILE"
+    info "Sudoers rule installed at ${SUDOERS_FILE}."
+else
+    rm -f "$SUDOERS_TMP"
+    error "Generated sudoers rule failed visudo -cf validation — aborting."
+fi
+rm -f "$SUDOERS_TMP"
 
 # ---------------------------------------------------------------------------
 # Step 12 — Log rotation

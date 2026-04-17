@@ -223,3 +223,144 @@ export async function getLogs(params?: {
   const q = qs.toString();
   return request(`/api/logs${q ? `?${q}` : ''}`);
 }
+
+// Bot service control
+export interface ServiceStatus {
+  active: boolean;
+  state: string;
+  unit: string;
+}
+
+export async function getServiceStatus(): Promise<ServiceStatus> {
+  return request('/api/bot/service-status');
+}
+
+export async function startService(): Promise<{ ok: boolean; action: string }> {
+  return request('/api/bot/start', { method: 'POST', body: JSON.stringify({}) });
+}
+
+export async function stopService(): Promise<{ ok: boolean; action: string }> {
+  return request('/api/bot/stop', {
+    method: 'POST',
+    body: JSON.stringify({ confirm: 'STOP' }),
+  });
+}
+
+export async function restartService(): Promise<{ ok: boolean; action: string }> {
+  return request('/api/bot/restart', {
+    method: 'POST',
+    body: JSON.stringify({ confirm: 'RESTART' }),
+  });
+}
+
+// Log streaming (SSE) — requires a short-lived stream token since EventSource
+// cannot send Authorization headers.
+export async function requestStreamToken(): Promise<string> {
+  const data = await request<{ stream_token: string }>(
+    '/api/logs/stream-token',
+    { method: 'POST', body: JSON.stringify({}) },
+  );
+  return data.stream_token;
+}
+
+// ML model management
+export interface MlVersion {
+  version: string;
+  trained_at: string;
+  n_samples: number;
+  metrics: Record<string, number>;
+  is_current?: boolean;
+}
+
+export interface MlJob {
+  id: number;
+  job_type: string;
+  status: string;
+  started_at: string;
+  finished_at: string | null;
+  version: string | null;
+  metrics: Record<string, number> | null;
+  error: string | null;
+  params: Record<string, unknown> | null;
+}
+
+export async function getMlVersions(): Promise<MlVersion[]> {
+  return request('/api/ml/versions');
+}
+
+export async function getMlCurrent(): Promise<{ version: string | null }> {
+  return request('/api/ml/current');
+}
+
+export async function startMlRetrain(params: {
+  forward_bars: number;
+  long_threshold_pct: number;
+  short_threshold_pct: number;
+  symbol?: string;
+  n_bars?: number;
+}): Promise<{ job_id: number }> {
+  return request('/api/ml/retrain', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+export async function startMlRollback(version: string): Promise<{ job_id: number }> {
+  return request('/api/ml/rollback', {
+    method: 'POST',
+    body: JSON.stringify({ version }),
+  });
+}
+
+export async function getMlJob(id: number): Promise<MlJob> {
+  return request(`/api/ml/jobs/${id}`);
+}
+
+export async function getMlJobs(): Promise<MlJob[]> {
+  return request('/api/ml/jobs');
+}
+
+// Universe approval
+export interface UniverseCandidate {
+  symbol: string;
+  score: number;
+  analysis: string;
+  passes_all_core: boolean;
+  near_resistance: boolean;
+  has_momentum: boolean;
+  pullback_above_ema9: boolean;
+}
+
+export interface UniverseSelection {
+  id: number;
+  scan_date: string;
+  candidates: UniverseCandidate[];
+  selected_symbol: string | null;
+  status: string;
+  reasoning: string | null;
+  created_at: string;
+  decided_at: string | null;
+  decided_by: string | null;
+}
+
+export async function getPendingSelection(): Promise<UniverseSelection | null> {
+  return request('/api/universe/pending');
+}
+
+export async function getSelectionHistory(): Promise<UniverseSelection[]> {
+  return request('/api/universe/history');
+}
+
+export async function approveSelection(selectionId: number, symbol: string): Promise<UniverseSelection> {
+  return request('/api/universe/approve', {
+    method: 'POST',
+    body: JSON.stringify({ selection_id: selectionId, symbol }),
+  });
+}
+
+export async function rejectSelection(selectionId: number, reason: string): Promise<UniverseSelection> {
+  return request('/api/universe/reject', {
+    method: 'POST',
+    body: JSON.stringify({ selection_id: selectionId, reason }),
+  });
+}
