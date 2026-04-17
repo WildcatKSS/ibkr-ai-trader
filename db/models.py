@@ -4,10 +4,10 @@ SQLAlchemy ORM models for ibkr-ai-trader.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text
+from sqlalchemy import Boolean, Date, DateTime, Float, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import JSON
 
@@ -119,4 +119,67 @@ class Trade(Base):
         return (
             f"<Trade id={self.id} symbol={self.symbol} action={self.action} "
             f"status={self.status}>"
+        )
+
+
+class MlJob(Base):
+    """
+    One ML admin job (retrain or rollback) spawned via the web UI.
+
+    Retrain jobs are executed on a background thread so the HTTP request
+    returns immediately with the job_id.  The UI polls ``GET /api/ml/jobs/{id}``
+    for progress and results.
+    """
+
+    __tablename__ = "ml_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_type: Mapped[str] = mapped_column(String(20), nullable=False)  # "retrain" | "rollback"
+    status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    # status: "pending" | "running" | "done" | "failed"
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    version: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    metrics: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    params: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    requested_by: Mapped[str | None] = mapped_column(String(80), nullable=True)
+
+    def __repr__(self) -> str:
+        return (
+            f"<MlJob id={self.id} type={self.job_type} status={self.status} "
+            f"version={self.version}>"
+        )
+
+
+class UniverseSelection(Base):
+    """
+    One universe-scan result awaiting (or already having) human approval.
+
+    Only used when ``UNIVERSE_APPROVAL_MODE = "approval"``.  The engine writes
+    a row on each scan; the user approves one symbol (or rejects all) via the
+    web UI; the engine reads the approved symbol on the next tick.
+    """
+
+    __tablename__ = "universe_selections"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    scan_date: Mapped[date] = mapped_column(Date, nullable=False, unique=True, index=True)
+    candidates: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
+    selected_symbol: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # status: "pending_approval" | "approved" | "rejected" | "autonomous"
+    status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    decided_by: Mapped[str | None] = mapped_column(String(80), nullable=True)
+
+    def __repr__(self) -> str:
+        return (
+            f"<UniverseSelection id={self.id} date={self.scan_date} "
+            f"status={self.status} selected={self.selected_symbol}>"
         )
