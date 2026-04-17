@@ -5,6 +5,7 @@ import {
   getPendingSelection,
   getSelectionHistory,
   rejectSelection,
+  scanNow,
 } from '../api'
 
 /**
@@ -99,10 +100,33 @@ export default function UniverseApproval() {
         </h2>
 
         {!pending ? (
-          <p className="text-gray-500 italic">
-            No scan awaiting approval. A new scan runs automatically on each
-            trading day.
-          </p>
+          <div>
+            <p className="text-gray-500 italic mb-3">
+              No scan awaiting approval. A new scan runs automatically on each
+              trading day.
+            </p>
+            <button
+              type="button"
+              onClick={async () => {
+                setBusy(true)
+                setError('')
+                setMessage('')
+                try {
+                  const res = await scanNow()
+                  setMessage(res.message || 'Scan requested — the engine will run it on the next tick.')
+                  refresh()
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : String(e))
+                } finally {
+                  setBusy(false)
+                }
+              }}
+              disabled={busy}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 text-white text-sm rounded"
+            >
+              {busy ? 'Requesting…' : 'Request scan now'}
+            </button>
+          </div>
         ) : (
           <>
             {pending.reasoning && (

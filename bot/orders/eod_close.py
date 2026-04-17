@@ -139,6 +139,17 @@ def close_all_positions(
                 side=close_side,
                 shares=shares,
             )
+            try:
+                from bot.alerts.notifier import notify
+                notify("eod_close_failed", {
+                    "reason": f"Fill timeout for {symbol} ({close_side} {shares} shares). "
+                              "Position may remain open overnight.",
+                    "symbol": symbol,
+                    "side": close_side,
+                    "shares": shares,
+                })
+            except BaseException:
+                pass
             results.append({
                 "symbol": symbol,
                 "action": close_side,

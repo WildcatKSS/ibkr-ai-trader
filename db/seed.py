@@ -237,12 +237,14 @@ DEFAULTS: list[tuple[str, str, str]] = [
     (
         "STOP_LOSS_PCT",
         "1.0",
-        "Default stop-loss as a percentage of entry price.",
+        "ATR multiplier for stop-loss distance (e.g. 1.0 = 1× ATR below entry "
+        "for longs, above entry for shorts).",
     ),
     (
         "TAKE_PROFIT_PCT",
         "2.0",
-        "Default take-profit as a percentage of entry price.",
+        "ATR multiplier for take-profit distance (e.g. 2.0 = 2× ATR above "
+        "entry for longs, below entry for shorts).",
     ),
     # ── Gap filter ───────────────────────────────────────────────────────────
     (

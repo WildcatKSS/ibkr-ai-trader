@@ -124,6 +124,10 @@ export async function getOpenTrades(): Promise<Trade[]> {
   return request('/api/trades/open');
 }
 
+export async function getTrade(id: number): Promise<Trade> {
+  return request(`/api/trades/${id}`);
+}
+
 // Performance
 export interface PerformanceData {
   period: string;
@@ -362,5 +366,12 @@ export async function rejectSelection(selectionId: number, reason: string): Prom
   return request('/api/universe/reject', {
     method: 'POST',
     body: JSON.stringify({ selection_id: selectionId, reason }),
+  });
+}
+
+export async function scanNow(): Promise<{ ok: boolean; message: string }> {
+  return request('/api/universe/scan-now', {
+    method: 'POST',
+    body: JSON.stringify({}),
   });
 }

@@ -45,8 +45,8 @@ sudo bash deploy/update.sh
 # Uninstall the bot from the server (interactive, asks per component)
 sudo bash deploy/uninstall.sh
 
-# Run backtesting engine (not yet implemented)
-# python -m bot.backtesting.engine --instrument AAPL --start 2024-01-01 --end 2024-12-31 --timeframe 5min
+# Run backtesting engine on historical CSV data
+python -m bot.backtesting.engine --data path/to/5min_ohlcv.csv --symbol AAPL
 
 # Retrain LightGBM model manually
 python -m bot.ml.trainer --retrain
@@ -67,15 +67,16 @@ bot/ml/          Feature engineering (features.py), LightGBM singleton (model.py
                  version manifest (versioning.py), training pipeline (trainer.py), models/
 bot/risk/        Circuit breaker + position sizing (manager.py)
 bot/orders/      IBKRBroker protocol + fill monitoring (executor.py), EOD close (eod_close.py)
-bot/backtesting/ Historical simulation engine — not yet implemented
-bot/sentiment/   News & sentiment analysis (Alpaca + Finnhub) — not yet implemented
+bot/backtesting/ Historical simulation engine (engine.py), metrics (metrics.py), results (results.py)
+bot/sentiment/   News & sentiment analysis: Alpaca (alpaca.py), Finnhub (finnhub.py), scoring (scorer.py)
 bot/alerts/      Email + webhook notifications (notifier.py)
 bot/utils/       Logger (logger.py), NYSE calendar (calendar.py), config loader (config.py)
 
-web/api/         FastAPI backend: main.py (6 endpoints), auth.py (JWT + rate limiting)
-web/frontend/    React management dashboard — not yet implemented
+web/api/         FastAPI backend: main.py (28 endpoints), auth.py (JWT + rate limiting),
+                 service.py (systemctl control), logs_stream.py (SSE), ml_admin.py, universe.py
+web/frontend/    React 19 + TypeScript + Vite + Tailwind CSS management dashboard
 
-db/              SQLAlchemy models: LogEntry, Setting, Trade (models.py)
+db/              SQLAlchemy models: LogEntry, Setting, Trade, MlJob, UniverseSelection (models.py)
                  Alembic migrations (migrations/), seed data (seed.py), session (session.py)
 deploy/          Server scripts: setup.sh, update.sh, uninstall.sh
                  systemd/: ibkr-bot.service, ibkr-web.service
