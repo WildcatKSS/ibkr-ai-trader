@@ -145,8 +145,9 @@ async def _log_event_generator(
         for r in rows:
             last_id = max(last_id, r.id)
             yield _format_event(r)
-    except Exception as exc:  # noqa: BLE001
-        yield f"event: error\ndata: {json.dumps({'error': str(exc)})}\n\n"
+    except Exception:  # noqa: BLE001
+        log.exception("SSE initial sync failed")
+        yield f"event: error\ndata: {json.dumps({'error': 'Internal error fetching logs.'})}\n\n"
 
     while True:
         if await disconnect_check():
@@ -169,8 +170,9 @@ async def _log_event_generator(
             for r in rows:
                 last_id = r.id
                 yield _format_event(r)
-        except Exception as exc:  # noqa: BLE001
-            yield f"event: error\ndata: {json.dumps({'error': str(exc)})}\n\n"
+        except Exception:  # noqa: BLE001
+            log.exception("SSE poll failed")
+            yield f"event: error\ndata: {json.dumps({'error': 'Internal error fetching logs.'})}\n\n"
 
         now = time.monotonic()
         if now - last_heartbeat > 15:

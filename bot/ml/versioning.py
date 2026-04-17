@@ -29,6 +29,7 @@ CLI::
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,23 @@ log = get_logger("ml")
 # ---------------------------------------------------------------------------
 _MODELS_DIR = Path(__file__).parent / "models"
 _MANIFEST = _MODELS_DIR / "version.json"
+
+
+# ---------------------------------------------------------------------------
+# Validation
+# ---------------------------------------------------------------------------
+
+_VERSION_RE = re.compile(r"^v[A-Za-z0-9_]+$")
+
+
+def _safe_model_path(version: str) -> Path:
+    """Build a model path from *version*, guarding against path traversal."""
+    if not _VERSION_RE.match(version):
+        raise ValueError(f"Invalid version format: {version!r}")
+    path = (_MODELS_DIR / f"model_{version}.lgbm").resolve()
+    if not path.is_relative_to(_MODELS_DIR.resolve()):
+        raise ValueError(f"Invalid version format: {version!r}")
+    return path
 
 
 # ---------------------------------------------------------------------------
@@ -66,7 +84,7 @@ def get_model_path(version: str | None = None) -> Path | None:
         version = get_current_version()
     if version is None:
         return None
-    path = _MODELS_DIR / f"model_{version}.lgbm"
+    path = _safe_model_path(version)
     return path if path.exists() else None
 
 
@@ -116,9 +134,9 @@ def rollback(version: str) -> None:
     known = {v["version"] for v in manifest.get("versions", [])}
     if version not in known:
         raise ValueError(f"Unknown version '{version}'. Known: {sorted(known)}")
-    path = _MODELS_DIR / f"model_{version}.lgbm"
+    path = _safe_model_path(version)
     if not path.exists():
-        raise ValueError(f"Model file not found: {path}")
+        raise ValueError(f"Model file not found for version '{version}'.")
     manifest["current"] = version
     _save_manifest(manifest)
     log.info("Model rolled back", version=version)
