@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getStatus, getPortfolio, getPerformance, type PortfolioData, type PerformanceData } from '../api'
+import BotControl from './BotControl'
 
 export default function Dashboard() {
   const [status, setStatus] = useState<{
@@ -27,6 +28,9 @@ export default function Dashboard() {
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold text-white">Dashboard</h1>
+
+      {/* Service control */}
+      <BotControl marketOpen={!!status.market_open} />
 
       {/* Status cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">

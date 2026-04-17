@@ -7,6 +7,9 @@ import TradeHistory from './components/TradeHistory'
 import Performance from './components/Performance'
 import Settings from './components/Settings'
 import Backtesting from './components/Backtesting'
+import LogViewer from './components/LogViewer'
+import MLModel from './components/MLModel'
+import UniverseApproval from './components/UniverseApproval'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   if (!isAuthenticated()) {
@@ -33,6 +36,9 @@ export default function App() {
           <Route path="performance" element={<Performance />} />
           <Route path="settings" element={<Settings />} />
           <Route path="backtesting" element={<Backtesting />} />
+          <Route path="logs" element={<LogViewer />} />
+          <Route path="ml" element={<MLModel />} />
+          <Route path="universe" element={<UniverseApproval />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
