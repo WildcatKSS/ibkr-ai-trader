@@ -10,7 +10,7 @@ python-multipart>=0.0.18       # form/file upload support (>=0.0.18 fixes ReDoS 
 itsdangerous>=2.2.0            # session signing
 
 # ── Authentication ────────────────────────────────────────────────────────────
-PyJWT[crypto]>=2.8.0               # JWT tokens (replaces python-jose, which has unpatched GHSA-cjwg-qfpm-7377)
+PyJWT[crypto]>=2.12.0              # JWT tokens (>=2.12.0 fixes CVE-2026-32597)
 passlib[bcrypt]>=1.7.4             # password hashing
 pyotp>=2.9.0                       # TOTP for optional 2FA
 
@@ -18,7 +18,7 @@ pyotp>=2.9.0                       # TOTP for optional 2FA
 sqlalchemy>=2.0.0
 alembic>=1.13.0
 PyMySQL>=1.1.0                 # MariaDB/MySQL connector (pure Python, no system lib needed)
-cryptography>=42.0.0           # required by PyMySQL for SSL connections
+cryptography>=46.0.6           # required by PyMySQL for SSL connections (>=46.0.6 fixes CVE-2026-34073)
 
 # ── Data & machine learning ───────────────────────────────────────────────────
 numpy>=1.26.0
@@ -51,6 +51,6 @@ httpx>=0.27.0                  # async HTTP client (webhook delivery, external A
 python-dotenv>=1.0.0           # loads /opt/ibkr-trader/.env at startup
 
 # ── Testing ───────────────────────────────────────────────────────────────────
-pytest>=8.1.0
+pytest>=9.0.3                      # >=9.0.3 fixes CVE-2025-71176 (tmp dir privilege escalation)
 pytest-asyncio>=0.23.0,<1.0.0    # 1.x introduced event loop hangs with sync tests
 pytest-mock>=3.14.0
