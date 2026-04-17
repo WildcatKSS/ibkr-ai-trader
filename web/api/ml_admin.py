@@ -63,9 +63,9 @@ class RetrainRequest(BaseModel):
 
     symbol: str = Field(..., min_length=1, max_length=20)
     n_bars: int = Field(default=5000, ge=500, le=20_000)
-    forward_bars: int = Field(default=6, ge=1, le=50)
-    long_threshold_pct: float = Field(default=0.3, gt=0, le=10)
-    short_threshold_pct: float = Field(default=0.3, gt=0, le=10)
+    forward_bars: int | None = Field(default=None, ge=1, le=50)
+    long_threshold_pct: float | None = Field(default=None, gt=0, le=10)
+    short_threshold_pct: float | None = Field(default=None, gt=0, le=10)
 
 
 class RollbackRequest(BaseModel):
@@ -192,6 +192,27 @@ def _run_retrain_job(job_id: int, req: RetrainRequest) -> None:
         _mark_running(job_id)
         log.info("Retrain job started", job_id=job_id, symbol=req.symbol)
 
+        # Resolve None fields from DB settings (user can override via form).
+        from bot.utils.config import get as get_setting
+        forward_bars = req.forward_bars
+        if forward_bars is None:
+            try:
+                forward_bars = int(get_setting("ML_FORWARD_BARS", default="6"))
+            except Exception:
+                forward_bars = 6
+        long_thr = req.long_threshold_pct
+        if long_thr is None:
+            try:
+                long_thr = float(get_setting("ML_LONG_THRESHOLD_PCT", default="0.3"))
+            except Exception:
+                long_thr = 0.3
+        short_thr = req.short_threshold_pct
+        if short_thr is None:
+            try:
+                short_thr = float(get_setting("ML_SHORT_THRESHOLD_PCT", default="0.3"))
+            except Exception:
+                short_thr = 0.3
+
         bars = _fetch_training_bars(req.symbol, req.n_bars)
         if bars is None or len(bars) < 500:
             msg = (
@@ -207,9 +228,9 @@ def _run_retrain_job(job_id: int, req: RetrainRequest) -> None:
         try:
             version = trainer.train(
                 bars,
-                forward_bars=req.forward_bars,
-                long_threshold_pct=req.long_threshold_pct,
-                short_threshold_pct=req.short_threshold_pct,
+                forward_bars=forward_bars,
+                long_threshold_pct=long_thr,
+                short_threshold_pct=short_thr,
             )
         except Exception as exc:  # noqa: BLE001
             _finish_job(job_id, status_value="failed", error=str(exc))

@@ -109,7 +109,7 @@ class TradingEngine:
         All operations within a tick must be non-blocking and complete well
         within tick_interval seconds.
         """
-        from bot.utils.calendar import is_market_open, is_trading_day, minutes_until_close
+        from bot.utils.calendar import is_market_open, is_trading_day, market_open, minutes_until_close
         from bot.utils.config import get
 
         # ── Hot-reload: detect TRADING_MODE changes from web UI ──────────
@@ -147,6 +147,22 @@ class TradingEngine:
         if not is_market_open():
             log.info("Market closed — skipping tick", timestamp=now.isoformat())
             return
+
+        # Wait for the opening-bell volatility to subside.
+        try:
+            buffer_min = int(get("MARKET_OPEN_BUFFER_MINUTES", default="5"))
+        except (ValueError, TypeError):
+            buffer_min = 5
+        if buffer_min > 0:
+            open_time = market_open()
+            minutes_since_open = (now - open_time).total_seconds() / 60
+            if minutes_since_open < buffer_min:
+                log.info(
+                    "Market open buffer — skipping tick",
+                    minutes_since_open=round(minutes_since_open, 1),
+                    buffer=buffer_min,
+                )
+                return
 
         mins_left = minutes_until_close()
 
@@ -541,6 +557,30 @@ class TradingEngine:
         if bars is None or len(bars) == 0:
             log.warning("No intraday bars returned", symbol=symbol)
             return
+
+        # Gap filter: skip symbols with excessive overnight gaps.
+        try:
+            gap_max = float(get("GAP_FILTER_MAX_PCT", default="3.0"))
+        except (ValueError, TypeError):
+            gap_max = 3.0
+        if gap_max > 0 and hasattr(bars.index, "date") and len(bars) >= 2:
+            dates = bars.index.date
+            today = dates[-1]
+            prev_mask = dates < today
+            today_mask = dates == today
+            if prev_mask.any() and today_mask.any():
+                prev_close = float(bars.loc[prev_mask, "close"].iloc[-1])
+                today_open = float(bars.loc[today_mask, "open"].iloc[0])
+                if prev_close > 0:
+                    gap_pct = abs(today_open - prev_close) / prev_close * 100
+                    if gap_pct > gap_max:
+                        log.info(
+                            "Gap filter — skipping symbol",
+                            symbol=symbol,
+                            gap_pct=round(gap_pct, 2),
+                            max_pct=gap_max,
+                        )
+                        return
 
         # Generate signal
         signal = generate(symbol, bars, ml_min_probability=ml_min_prob)

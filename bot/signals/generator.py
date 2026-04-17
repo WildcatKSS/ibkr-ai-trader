@@ -188,10 +188,16 @@ def generate(
     # ── Snapshot of key indicators (last bar) ─────────────────────────────
     snap = _indicator_snapshot(enriched)
 
-    # Compute ATR-based suggested prices
+    # Compute ATR-based suggested prices using configurable multipliers
     atr = snap.get("atr", 0.0) or 0.0
     close = snap.get("close", 0.0) or 0.0
-    entry, target, stop = _atr_prices(close, atr, ml_label)
+    try:
+        from bot.utils.config import get as get_setting
+        stop_mult = float(get_setting("STOP_LOSS_PCT", default="1.0"))
+        target_mult = float(get_setting("TAKE_PROFIT_PCT", default="2.0"))
+    except Exception:
+        stop_mult, target_mult = 1.0, 2.0
+    entry, target, stop = _atr_prices(close, atr, ml_label, stop_mult, target_mult)
 
     # ── Claude API ────────────────────────────────────────────────────────
     if client is None:
@@ -343,24 +349,28 @@ def _resample_to_15min(bars: pd.DataFrame) -> pd.DataFrame:
 
 
 def _atr_prices(
-    close: float, atr: float, action: str
+    close: float,
+    atr: float,
+    action: str,
+    stop_mult: float = 1.0,
+    target_mult: float = 2.0,
 ) -> tuple[float, float, float]:
     """
     Compute ATR-based entry / target / stop as a starting point.
 
-    Target = 2× ATR; stop = 1× ATR.
+    Multipliers are read from DB settings STOP_LOSS_PCT and TAKE_PROFIT_PCT.
     """
     if atr <= 0 or close <= 0:
         return close, close, close
 
     if action == "long":
         entry = close
-        target = close + 2.0 * atr
-        stop = close - 1.0 * atr
+        target = close + target_mult * atr
+        stop = close - stop_mult * atr
     else:  # short
         entry = close
-        target = close - 2.0 * atr
-        stop = close + 1.0 * atr
+        target = close - target_mult * atr
+        stop = close + stop_mult * atr
 
     return round(entry, 4), round(target, 4), round(stop, 4)
 
