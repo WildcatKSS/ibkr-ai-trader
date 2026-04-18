@@ -44,6 +44,7 @@ router = APIRouter(prefix="/api/ml", tags=["ml-admin"])
 
 # Only one retrain can run at a time — the trainer pins CPU cores and the
 # model manifest is a single JSON file that cannot be written concurrently.
+# Process-local lock — safe with --workers 1 (see ibkr-web.service).
 _train_lock = threading.Lock()
 
 

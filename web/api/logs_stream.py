@@ -60,6 +60,7 @@ class _Token:
     created_at: float
 
 
+# Process-local token store — safe with --workers 1 (see ibkr-web.service).
 _tokens_lock = threading.Lock()
 _tokens: dict[str, _Token] = {}
 

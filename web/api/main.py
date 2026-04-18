@@ -2,7 +2,7 @@
 FastAPI application entry point for ibkr-ai-trader web interface.
 
 Run via systemd:
-    uvicorn web.api.main:app --host 127.0.0.1 --port 8000 --workers 2
+    uvicorn web.api.main:app --host 127.0.0.1 --port 8000 --workers 1
 
 Routes:
     POST /api/auth/login    — obtain a JWT token (no auth required)
@@ -84,9 +84,24 @@ def _cors_origins() -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+def _warn_if_multi_worker() -> None:
+    try:
+        workers = int(os.getenv("WEB_CONCURRENCY", "1"))
+        if workers > 1:
+            log.warning(
+                "Running with multiple workers — process-local state "
+                "(rate limiter, config cache, SSE tokens, locks) will NOT be "
+                "shared. Set --workers 1 for this single-user application.",
+                workers=workers,
+            )
+    except (ValueError, TypeError):
+        pass
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("Web API starting up")
+    _warn_if_multi_worker()
     yield
     log.info("Web API shutting down")
     logger_shutdown()
