@@ -63,31 +63,31 @@ def _mock_broker(fill: str = "Filled", fill_price: float = 150.10) -> MagicMock:
 
 class TestExecuteDryrun:
     def test_dryrun_returns_success(self):
-        with patch("bot.orders.executor._create_trade_record", return_value=None):
+        with patch("bot.orders.executor._create_trade_record", return_value=42):
             with patch("bot.orders.executor._update_trade"):
                 result = execute(_signal(), _decision(), trading_mode="dryrun")
         assert result.success is True
 
     def test_dryrun_no_broker_needed(self):
-        with patch("bot.orders.executor._create_trade_record", return_value=None):
+        with patch("bot.orders.executor._create_trade_record", return_value=42):
             with patch("bot.orders.executor._update_trade"):
                 result = execute(_signal(), _decision(), trading_mode="dryrun", broker=None)
         assert result.success is True
 
     def test_dryrun_fill_price_is_entry(self):
-        with patch("bot.orders.executor._create_trade_record", return_value=None):
+        with patch("bot.orders.executor._create_trade_record", return_value=42):
             with patch("bot.orders.executor._update_trade"):
                 result = execute(_signal(), _decision(), trading_mode="dryrun")
         assert result.fill_price == 150.0
 
     def test_dryrun_correct_shares(self):
-        with patch("bot.orders.executor._create_trade_record", return_value=None):
+        with patch("bot.orders.executor._create_trade_record", return_value=42):
             with patch("bot.orders.executor._update_trade"):
                 result = execute(_signal(), _decision(approved=True), trading_mode="dryrun")
         assert result.shares == 20
 
     def test_dryrun_symbol_preserved(self):
-        with patch("bot.orders.executor._create_trade_record", return_value=None):
+        with patch("bot.orders.executor._create_trade_record", return_value=42):
             with patch("bot.orders.executor._update_trade"):
                 result = execute(_signal(), _decision(), trading_mode="dryrun")
         assert result.symbol == "AAPL"
@@ -287,3 +287,21 @@ class TestCloseAllPositions:
         ):
             results = close_all_positions(broker, trading_mode="paper")
         assert results[0]["success"] is False
+
+
+# ---------------------------------------------------------------------------
+# execute() — trade record creation failure
+# ---------------------------------------------------------------------------
+
+
+class TestTradeRecordFailure:
+    def test_db_failure_aborts_paper_order(self):
+        with patch("bot.orders.executor._create_trade_record", return_value=None):
+            result = execute(_signal(), _decision(), trading_mode="paper")
+        assert result.success is False
+        assert "Trade record creation failed" in result.reason
+
+    def test_db_failure_aborts_dryrun_order(self):
+        with patch("bot.orders.executor._create_trade_record", return_value=None):
+            result = execute(_signal(), _decision(), trading_mode="dryrun")
+        assert result.success is False

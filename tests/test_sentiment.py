@@ -62,12 +62,14 @@ class TestScoreArticles:
         assert score_articles([]) == 0.0
 
     def test_single_bullish_article(self):
-        articles = [{"title": "Stock surges on earnings beat", "summary": "Strong growth"}]
+        now = datetime.now(tz=timezone.utc).isoformat()
+        articles = [{"title": "Stock surges on earnings beat", "summary": "Strong growth", "created_at": now}]
         score = score_articles(articles)
         assert score > 0
 
     def test_single_bearish_article(self):
-        articles = [{"title": "Stock crashes after downgrade", "summary": "Sell rating"}]
+        now = datetime.now(tz=timezone.utc).isoformat()
+        articles = [{"title": "Stock crashes after downgrade", "summary": "Sell rating", "created_at": now}]
         score = score_articles(articles)
         assert score < 0
 
@@ -119,13 +121,13 @@ class TestRecencyWeight:
         w = _recency_weight(int(now.timestamp()), now)
         assert w > 0.9
 
-    def test_none_returns_default(self):
+    def test_none_returns_zero(self):
         now = datetime.now(tz=timezone.utc)
-        assert _recency_weight(None, now) == 0.5
+        assert _recency_weight(None, now) == 0.0
 
-    def test_invalid_string_returns_default(self):
+    def test_invalid_string_returns_zero(self):
         now = datetime.now(tz=timezone.utc)
-        assert _recency_weight("not-a-date", now) == 0.5
+        assert _recency_weight("not-a-date", now) == 0.0
 
     def test_weight_bounded(self):
         now = datetime.now(tz=timezone.utc)
@@ -140,7 +142,8 @@ class TestRecencyWeight:
 
 class TestGetSentiment:
     def test_returns_float(self):
-        articles = [{"title": "Stock surges", "summary": "bullish rally"}]
+        now = datetime.now(tz=timezone.utc).isoformat()
+        articles = [{"title": "Stock surges", "summary": "bullish rally", "created_at": now}]
         with (
             patch("bot.sentiment.alpaca.fetch_news", return_value=articles),
             patch("bot.sentiment.finnhub.fetch_news", return_value=[]),
@@ -151,7 +154,8 @@ class TestGetSentiment:
 
     def test_falls_back_to_finnhub(self):
         """When Alpaca returns nothing, Finnhub should be tried."""
-        finnhub_articles = [{"title": "Earnings beat", "summary": "growth"}]
+        now = datetime.now(tz=timezone.utc).isoformat()
+        finnhub_articles = [{"title": "Earnings beat", "summary": "growth", "created_at": now}]
         with (
             patch("bot.sentiment.alpaca.fetch_news", return_value=[]),
             patch("bot.sentiment.finnhub.fetch_news", return_value=finnhub_articles),
@@ -169,8 +173,9 @@ class TestGetSentiment:
 
     def test_alpaca_preferred_over_finnhub(self):
         """If Alpaca has data, Finnhub should NOT be called."""
-        alpaca_articles = [{"title": "Stock crashes", "summary": "bearish"}]
-        finnhub_mock = MagicMock(return_value=[{"title": "Stock surges", "summary": "bullish"}])
+        now = datetime.now(tz=timezone.utc).isoformat()
+        alpaca_articles = [{"title": "Stock crashes", "summary": "bearish", "created_at": now}]
+        finnhub_mock = MagicMock(return_value=[{"title": "Stock surges", "summary": "bullish", "created_at": now}])
         with (
             patch("bot.sentiment.alpaca.fetch_news", return_value=alpaca_articles),
             patch("bot.sentiment.finnhub.fetch_news", finnhub_mock),
