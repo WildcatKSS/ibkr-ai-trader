@@ -227,8 +227,8 @@ def generate(
     try:
         from bot.sentiment import get_sentiment
         sentiment_score = get_sentiment(symbol)
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning("Sentiment fetch failed — defaulting to 0.0", symbol=symbol, error=str(exc))
 
     prompt = _build_prompt(symbol, ml_label, ml_prob, snap, entry, target, stop,
                            sentiment=sentiment_score)
@@ -254,23 +254,11 @@ def generate(
         return signal
     except Exception as exc:  # noqa: BLE001
         log_claude.error(
-            "Claude API call failed — using ATR-based signal",
+            "Claude API call failed — discarding signal (fail-closed)",
             symbol=symbol,
             error=str(exc),
         )
-        return Signal(
-            symbol=symbol,
-            action=ml_label,
-            entry_price=entry,
-            target_price=target,
-            stop_price=stop,
-            confidence=ml_prob,
-            explanation=f"ML signal ({ml_label}, p={ml_prob:.2f}). Claude error: {exc}",
-            ml_label=ml_label,
-            ml_probability=ml_prob,
-            confirmed_15min=confirmed,
-            indicators=snap,
-        )
+        return _no_signal(symbol, "claude_api_error", ml_label=ml_label, ml_prob=ml_prob)
 
 
 # ---------------------------------------------------------------------------
@@ -303,10 +291,10 @@ def _confirm_15min(symbol: str, bars_5min: pd.DataFrame, ml_label: str) -> bool:
         enriched_15 = calculate(bars_15)
     except Exception as exc:
         log.warning("15-min indicator error", symbol=symbol, error=str(exc))
-        return True  # default to confirmed on error
+        return False  # fail-closed: do not confirm on error
 
     if enriched_15.empty:
-        return True  # insufficient data — default to confirmed
+        return False  # fail-closed: do not confirm on empty data
 
     last = enriched_15.iloc[-1]
     ema_cross = last.get("ema_cross", float("nan"))
@@ -315,7 +303,7 @@ def _confirm_15min(symbol: str, bars_5min: pd.DataFrame, ml_label: str) -> bool:
     import math
 
     if math.isnan(ema_cross) or math.isnan(macd_hist):
-        return True  # insufficient history — default to confirmed
+        return False  # fail-closed: do not confirm on NaN indicators
 
     if ml_label == "long":
         return bool(ema_cross == 1 and macd_hist > 0)
@@ -505,25 +493,12 @@ def _parse_response(
         )
     except (json.JSONDecodeError, ValueError, KeyError, TypeError) as exc:
         log_claude.warning(
-            "Failed to parse Claude signal response — using ATR fallback",
+            "Failed to parse Claude signal response — discarding signal (fail-closed)",
             symbol=symbol,
             error=str(exc),
             raw=raw[:200],
         )
-        entry, target, stop = _atr_prices(close, atr, ml_label)
-        return Signal(
-            symbol=symbol,
-            action=ml_label,
-            entry_price=entry,
-            target_price=target,
-            stop_price=stop,
-            confidence=ml_prob,
-            explanation=f"ML signal ({ml_label}, p={ml_prob:.2f}). Parse error: {exc}",
-            ml_label=ml_label,
-            ml_probability=ml_prob,
-            confirmed_15min=confirmed,
-            indicators=snap,
-        )
+        return _no_signal(symbol, "claude_parse_error", ml_label=ml_label, ml_prob=ml_prob)
 
 
 # ---------------------------------------------------------------------------

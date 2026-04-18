@@ -145,9 +145,9 @@ def score_articles(articles: list[dict]) -> float:
 
 
 def _recency_weight(created_at: str | int | None, now: datetime) -> float:
-    """Compute a decay weight based on article age.  Returns 0.1–1.0."""
+    """Compute a decay weight based on article age.  Returns 0.0–1.0."""
     if not created_at:
-        return 0.5  # unknown age → middle weight
+        return 0.0  # unknown age → discard (fail-closed)
 
     try:
         if isinstance(created_at, (int, float)):
@@ -162,7 +162,7 @@ def _recency_weight(created_at: str | int | None, now: datetime) -> float:
         weight = 2 ** (-hours_ago / 6)
         return max(0.1, min(1.0, weight))
     except (ValueError, TypeError, OSError):
-        return 0.5
+        return 0.0  # unparseable date → discard (fail-closed)
 
 
 def get_sentiment(symbol: str) -> float:

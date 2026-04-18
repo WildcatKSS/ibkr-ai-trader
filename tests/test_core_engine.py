@@ -507,8 +507,26 @@ class TestHasOpenPosition:
             mock_gs.return_value = mock_session
             assert e._has_open_position("AAPL") is True
 
-    def test_db_error_returns_false(self):
-        """On DB error, fail open (allow signal rather than block everything)."""
+    def test_db_error_returns_true(self):
+        """On DB error, fail closed (block signal to prevent double entries)."""
         e = _make_engine()
         with patch("db.session.get_session", side_effect=Exception("db down")):
-            assert e._has_open_position("AAPL") is False
+            assert e._has_open_position("AAPL") is True
+
+
+class TestGetPortfolioValue:
+    def test_returns_none_when_no_broker(self):
+        e = _make_engine()
+        assert e._get_portfolio_value() is None
+
+    def test_returns_none_on_broker_error(self):
+        mock_provider = MagicMock()
+        mock_provider.broker.get_portfolio_value.side_effect = RuntimeError("API down")
+        e = TradingEngine(trading_mode="dryrun", tick_interval=0, data_provider=mock_provider)
+        assert e._get_portfolio_value() is None
+
+    def test_returns_value_on_success(self):
+        mock_provider = MagicMock()
+        mock_provider.broker.get_portfolio_value.return_value = 50000.0
+        e = TradingEngine(trading_mode="dryrun", tick_interval=0, data_provider=mock_provider)
+        assert e._get_portfolio_value() == 50000.0

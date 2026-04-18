@@ -45,6 +45,7 @@ _bearer = HTTPBearer()
 
 _MAX_ATTEMPTS = 5       # failed attempts allowed per window
 _WINDOW_SECS = 60       # seconds in the sliding window
+# Process-local — safe with --workers 1 (see ibkr-web.service).
 _rl_lock = threading.Lock()
 _failed_attempts: dict[str, collections.deque] = collections.defaultdict(collections.deque)
 

@@ -153,6 +153,22 @@ def execute(
 
     # Persist the trade record immediately (status = "pending")
     trade_id = _create_trade_record(signal, decision, trading_mode)
+    if trade_id is None:
+        log.error(
+            "Cannot persist trade record — aborting order (fail-closed)",
+            symbol=signal.symbol,
+            action=signal.action,
+        )
+        return OrderResult(
+            success=False,
+            trade_id=None,
+            order_id=None,
+            fill_price=None,
+            shares=decision.shares,
+            symbol=signal.symbol,
+            action=signal.action,
+            reason="Trade record creation failed — order aborted.",
+        )
 
     # ── Dryrun ────────────────────────────────────────────────────────────
     if trading_mode == "dryrun":

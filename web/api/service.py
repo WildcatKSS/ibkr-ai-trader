@@ -39,10 +39,7 @@ _UNIT = "ibkr-bot"
 # Actions that require root privileges and are routed through sudo.
 _PRIVILEGED_ACTIONS: frozenset[str] = frozenset({"start", "stop", "restart"})
 
-# Serialises state-changing calls across workers.  Uvicorn --workers 2 starts
-# two processes, so this is effective only within a single worker; the
-# combination of systemd idempotence and the UI's confirm-dialog is what
-# prevents races across workers.  Within one worker this lock is enough.
+# Process-local lock — safe with --workers 1 (see ibkr-web.service).
 _action_lock = threading.Lock()
 
 # Timeout for the subprocess.run call (seconds).  systemd actions typically

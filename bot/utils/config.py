@@ -68,6 +68,7 @@ def _parse_ttl() -> int:
 
 _TTL: int = _parse_ttl()
 
+# Process-local cache — safe with --workers 1 (see ibkr-web.service).
 _cache: dict[str, str] = {}
 _loaded_at: float = 0.0  # epoch seconds of last successful DB load
 _lock = threading.Lock()
