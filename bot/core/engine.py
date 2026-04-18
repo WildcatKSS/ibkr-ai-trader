@@ -474,6 +474,9 @@ class TradingEngine:
         # In dryrun mode we still run the pipeline so the logs are useful,
         # but no real orders are sent.
         portfolio_value = self._get_portfolio_value()
+        if portfolio_value is None:
+            log.warning("Portfolio value unavailable — skipping all signals this tick")
+            return
 
         for symbol in self._watchlist:
             try:
@@ -522,11 +525,11 @@ class TradingEngine:
             return row is not None
         except Exception as exc:
             log.warning(
-                "Cannot check open positions — allowing signal",
+                "Cannot check open positions — blocking signal (fail-closed)",
                 symbol=symbol,
                 error=str(exc),
             )
-            return False  # fail open
+            return True  # fail closed: assume position exists, block new entry
 
     def _run_signal_for_symbol(
         self,
@@ -651,15 +654,15 @@ class TradingEngine:
                     "trading_mode": self._trading_mode,
                 })
 
-    def _get_portfolio_value(self) -> float:
-        """Return current portfolio NAV; falls back to 100 000 on error."""
+    def _get_portfolio_value(self) -> float | None:
+        """Return current portfolio NAV, or None if unavailable."""
         try:
             broker = getattr(self._data_provider, "broker", None)
             if broker and hasattr(broker, "get_portfolio_value"):
                 return float(broker.get_portfolio_value())
         except Exception as exc:
-            log.warning("Cannot get portfolio value", error=str(exc))
-        return 100_000.0
+            log.warning("Cannot get portfolio value — skipping signals", error=str(exc))
+        return None
 
     def _on_shutdown(self) -> None:
         """

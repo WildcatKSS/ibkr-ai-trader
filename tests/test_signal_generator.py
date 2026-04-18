@@ -233,7 +233,7 @@ class TestGenerateWithSignal:
 
         assert signal.action == "no_trade"
 
-    def test_claude_api_error_falls_back_to_atr(self):
+    def test_claude_api_error_discards_signal(self):
         bars = _make_bars()
         mock_client = MagicMock()
         mock_client.messages.create.side_effect = RuntimeError("API down")
@@ -245,8 +245,23 @@ class TestGenerateWithSignal:
             mock_15m.return_value = True
             signal = generate("AAPL", bars, client=mock_client)
 
-        assert signal.action == "long"
-        assert signal.entry_price > 0
+        assert signal.action == "no_trade"
+
+    def test_claude_parse_error_discards_signal(self):
+        bars = _make_bars()
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value.content = [
+            MagicMock(text="not valid json at all")
+        ]
+        with (
+            patch("bot.ml.model.predict") as mock_predict,
+            patch("bot.signals.generator._confirm_15min") as mock_15m,
+        ):
+            mock_predict.return_value = ("long", 0.72)
+            mock_15m.return_value = True
+            signal = generate("AAPL", bars, client=mock_client)
+
+        assert signal.action == "no_trade"
 
     def test_15min_failure_discards_signal(self):
         bars = _make_bars()
